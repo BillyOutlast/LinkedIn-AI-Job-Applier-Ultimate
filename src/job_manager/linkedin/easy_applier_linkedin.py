@@ -12,6 +12,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
+from config.app_config import FORM_ERROR_MAX_RETRIES
 from config.constants import PHOTO_DIR
 from config.logger_config import logger
 from src.dashboard.runtime import StopRequested, capture_page_screenshot, emit_event
@@ -110,7 +111,10 @@ class LinkedInEasyApplier(BaseEasyApplier):
         # Check for Easy Apply daily limit before attempting to apply
         if await self._check_easy_apply_limit():
             logger.warning("Easy Apply daily limit reached. Skipping job application.")
-            return ("Limit", "Easy Apply daily limit reached. Skipping job application."), None
+            return (
+                "Limit",
+                "Easy Apply daily limit reached. Skipping job application.",
+            ), None
 
         try:
             apply_result = await self.job_easy_apply(job)
@@ -186,7 +190,10 @@ class LinkedInEasyApplier(BaseEasyApplier):
                 await self._save_job_application_process()
             except Exception as e:
                 logger.error(f"Failed to save job application process: {e}")
-            return "Error", f"Failed to apply to job! Original exception:\nTraceback:\n{tb_str}"
+            return (
+                "Error",
+                f"Failed to apply to job! Original exception:\nTraceback:\n{tb_str}",
+            )
 
     async def _check_easy_apply_limit(self) -> bool:
         """Check if Easy Apply daily limit has been reached (async)
@@ -364,11 +371,11 @@ class LinkedInEasyApplier(BaseEasyApplier):
         await next_button.click(timeout=1000)
         await async_pause(2, 3)
         attempt = 0
-        while attempt < 3:
+        while attempt < FORM_ERROR_MAX_RETRIES:
             error_texts = await self._find_all_form_errors()
             if len(error_texts) > 0:
                 logger.info(f"Found {len(error_texts)} errors")
-                await self._fill_textbox_question_errors()
+                await self._fill_form_errors()
                 await async_pause(1, 2)
                 next_button, _ = await self._find_next_or_submit_button()
                 try:
@@ -1114,7 +1121,9 @@ class LinkedInEasyApplier(BaseEasyApplier):
                     selected_options = existing_answer
                 else:
                     selected_options = self.gpt_answerer.select_many_answers_from_options(
-                        question_text, checkbox_options, self.previous_question_texts[:-1]
+                        question_text,
+                        checkbox_options,
+                        self.previous_question_texts[:-1],
                     )
                     if not any(self._is_no_info_answer(s) for s in selected_options):
                         self._save_questions(
@@ -1158,7 +1167,12 @@ class LinkedInEasyApplier(BaseEasyApplier):
                     try:
                         if any(
                             confirm_word in label_text.lower()
-                            for confirm_word in ["confirmed", "confirm", "agree", "accept"]
+                            for confirm_word in [
+                                "confirmed",
+                                "confirm",
+                                "agree",
+                                "accept",
+                            ]
                         ):
                             if not await checkbox.is_checked():
                                 logger.info(
@@ -1240,8 +1254,7 @@ class LinkedInEasyApplier(BaseEasyApplier):
                 question_text = ""
 
             # Extract options text from radio buttons and their labels
-            options = await section.locator(",".join(radio_selectors)).evaluate_all(
-                """els => {
+            options = await section.locator(",".join(radio_selectors)).evaluate_all("""els => {
                     const seen = new Set();
                     return els.reduce((acc, e) => {
                         if (e.id && !seen.has(e.id)) {
@@ -1252,8 +1265,7 @@ class LinkedInEasyApplier(BaseEasyApplier):
                         }
                         return acc;
                     }, []);
-                }"""
-            )
+                }""")
             options = list(dict.fromkeys(options))
 
             if not options:
@@ -1938,6 +1950,275 @@ class LinkedInEasyApplier(BaseEasyApplier):
                 Question(question_type="text", question=question_text, answer=answer)
             )
         return True
+
+    async def _fill_form_errors(self) -> bool:
+        """Find form fields with validation errors and fill them based on field type (async).
+        Handles text, select/dropdown, radio, checkbox, and file fields.
+        Falls back to _fill_textbox_question_errors for text-specific LLM answering.
+        """
+        logger.debug("Searching for form errors across all field types")
+
+        form_container_selectors = [
+            "xpath=.//*[contains(@class, 'fb-dash-form-element')]",
+            "div[data-test-form-element]",
+            "xpath=.//*[contains(@class, 'jobs-easy-apply-form-section__group')]",
+        ]
+
+        form_containers = []
+        for selector in form_container_selectors:
+            try:
+                form_containers = await self.page.locator(selector).all()
+                if form_containers:
+                    logger.debug(
+                        f"Found {len(form_containers)} form containers with selector: {selector}"
+                    )
+                    break
+            except Exception:
+                continue
+
+        if not form_containers:
+            logger.debug("No form containers found")
+            return False
+
+        filled_any = False
+        for section in form_containers:
+            # Check for error in this section
+            error_text = ""
+            try:
+                error_selectors = [
+                    ".artdeco-inline-feedback--error .artdeco-inline-feedback__message",
+                    ".artdeco-inline-feedback--error",
+                    "[role='alert'][data-test-form-element-error-messages]",
+                ]
+                for sel in error_selectors:
+                    loc = section.locator(sel)
+                    cand_data = await loc.evaluate_all(
+                        "els => els.map((e, i) => ({i, visible: e.offsetParent !== null, text: e.textContent?.trim() || ''}))"
+                    )
+                    match = next((d for d in cand_data if d["visible"] and d["text"]), None)
+                    if match:
+                        error_text = match["text"]
+                        break
+            except Exception:
+                continue
+
+            if not error_text:
+                continue
+
+            logger.info(f"Found form error in section: {error_text}")
+
+            # Find the field in this section
+            field = await self._find_field_in_section(section)
+            if not field:
+                logger.debug("No fillable field found in errored section, skipping")
+                continue
+
+            field_type = await self._detect_field_type(field)
+            logger.debug(f"Detected field type: {field_type}")
+
+            try:
+                if field_type == "select":
+                    await self._fill_dropdown(field)
+                    filled_any = True
+                elif field_type == "radio":
+                    await self._fill_radio(field)
+                    filled_any = True
+                elif field_type == "checkbox":
+                    await self._fill_checkbox(field)
+                    filled_any = True
+                elif field_type in ("text", "textarea"):
+                    # Use existing LLM-based text filler
+                    await self._fill_textbox_error(section, field, error_text)
+                    filled_any = True
+                elif field_type == "file":
+                    logger.warning("File upload error detected but cannot auto-fill")
+                else:
+                    logger.warning(f"Unknown field type '{field_type}', skipping")
+            except Exception as e:
+                logger.warning(f"Failed to fill {field_type} field: {e}")
+
+        # Also try the existing textbox-specific handler for any remaining text errors
+        if not filled_any:
+            filled_any = await self._fill_textbox_question_errors()
+
+        return filled_any
+
+    async def _find_field_in_section(self, section: Any) -> Any:
+        """Find the first fillable field in a form section (async)"""
+        field_selectors = [
+            "select",
+            "input[type='radio']",
+            "input[type='checkbox']",
+            "input[type='text']",
+            "input[type='number']",
+            "textarea",
+            "[role='listbox']",
+            ".artdeco-text-input--input",
+        ]
+        for selector in field_selectors:
+            try:
+                loc = section.locator(selector)
+                count = await loc.count()
+                if count > 0:
+                    # Return first visible one
+                    for i in range(count):
+                        el = loc.nth(i)
+                        if await el.is_visible():
+                            return el
+            except Exception:
+                continue
+        return None
+
+    async def _detect_field_type(self, field: Any) -> str:
+        """Detect the type of a form field (async)"""
+        try:
+            tag = await field.evaluate("el => el.tagName.toLowerCase()")
+            input_type = await field.evaluate("el => el.type || ''")
+
+            if tag == "select":
+                return "select"
+            if await field.evaluate("el => el.getAttribute('role') === 'listbox'"):
+                return "select"
+            if tag == "input" and input_type == "radio":
+                return "radio"
+            if tag == "input" and input_type == "checkbox":
+                return "checkbox"
+            if tag == "input" and input_type == "file":
+                return "file"
+            if tag == "textarea":
+                return "textarea"
+            if tag == "input" and input_type in ("text", "number", ""):
+                return "text"
+        except Exception as e:
+            logger.debug(f"Error detecting field type: {e}")
+        return "unknown"
+
+    async def _fill_dropdown(self, field: Any) -> None:
+        """Fill a dropdown/select field with a smart default (async)"""
+        try:
+            options = await field.evaluate("""
+                el => Array.from(el.options || el.querySelectorAll('option'))
+                    .map(o => ({value: o.value, text: o.textContent.trim(), disabled: o.disabled}))
+            """)
+            valid_options = [o for o in options if o["value"] and not o["disabled"] and o["text"]]
+
+            if not valid_options:
+                logger.warning("No valid options found in dropdown")
+                return
+
+            selected = None
+
+            # 1. Yes/No dropdowns -> pick the positive option
+            for opt in valid_options:
+                if opt["text"].lower() in ("yes", "yes, i do", "i agree", "true"):
+                    selected = opt
+                    break
+
+            # 2. Required field with few options -> pick first non-empty
+            if not selected and len(valid_options) <= 5:
+                selected = valid_options[0]
+
+            # 3. Fallback -> first option
+            if not selected:
+                selected = valid_options[0]
+
+            logger.info(f"Selected dropdown value: {selected['text']}")
+            await field.select_option(value=selected["value"])
+        except Exception as e:
+            logger.warning(f"Failed to fill dropdown: {e}")
+
+    async def _fill_radio(self, field: Any) -> None:
+        """Select the first available radio button in the group (async)"""
+        try:
+            group_name = await field.evaluate("el => el.name")
+            if not group_name:
+                return
+
+            radios = await find_elements_safely(
+                self.page,
+                f"input[type='radio'][name='{group_name}']",
+                "css",
+            )
+
+            for radio in radios:
+                if not await radio.is_disabled():
+                    await radio.click(timeout=1000)
+                    label = await radio.evaluate(
+                        "el => el.labels?.[0]?.textContent?.trim() || el.value"
+                    )
+                    logger.info(f"Selected radio option: {label}")
+                    return
+        except Exception as e:
+            logger.warning(f"Failed to fill radio field: {e}")
+
+    async def _fill_checkbox(self, field: Any) -> None:
+        """Check required consent checkboxes (async)"""
+        try:
+            is_checked = await field.is_checked()
+            if is_checked:
+                return
+
+            is_required = await field.evaluate("""
+                el => el.required || el.getAttribute('aria-required') === 'true'
+                    || !!el.closest('.artdeco-form-item--bordered')
+            """)
+
+            if is_required:
+                await field.check(timeout=1000)
+                label = await field.evaluate(
+                    "el => el.labels?.[0]?.textContent?.trim() || 'unknown'"
+                )
+                logger.info(f"Checked required checkbox: {label}")
+        except Exception as e:
+            logger.warning(f"Failed to fill checkbox: {e}")
+
+    async def _fill_textbox_error(self, section: Any, field: Any, error_text: str) -> None:
+        """Fill a textbox field that has a validation error using LLM (async)"""
+        try:
+            # Extract question text from label
+            question_text = ""
+            label_selectors = [
+                "label",
+                ".fb-dash-form-element__label",
+                ".artdeco-text-input--label",
+            ]
+            for selector in label_selectors:
+                labels = await find_elements_safely(section, selector, "css selector")
+                if labels:
+                    question_text = (await labels[0].text_content() or "").lower().strip()
+                    question_text = self._deduplicate_question_text(question_text)
+                    break
+
+            if not question_text:
+                alt = await field.get_attribute("aria-label") or await field.get_attribute(
+                    "placeholder"
+                )
+                if alt:
+                    question_text = alt.strip()
+
+            logger.info(
+                f"Answering textbox question with error: {question_text}. Error: {error_text}"
+            )
+            answer = self.gpt_answerer.answer_question_textual_wide_range_with_error(
+                question_text,
+                error_text,
+                await field.get_attribute("value"),
+                self.previous_question_texts[:-1],
+            )
+            if self._is_no_info_answer(answer):
+                raise NoInfoException(
+                    f"Can't fix error: {error_text}. No info found for question: {question_text}"
+                )
+            answer = self.resume_anonymizer.deanonymize_text(answer)
+            await field.fill(answer)
+            await self._process_autocomplete_suggestions(field)
+            self._save_questions(
+                Question(question_type="text", question=question_text, answer=answer)
+            )
+        except NoInfoException:
+            raise
+        except Exception as e:
+            logger.warning(f"Failed to fill textbox error: {e}")
 
 
 if __name__ == "__main__":
