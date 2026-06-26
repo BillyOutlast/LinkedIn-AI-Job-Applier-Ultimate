@@ -16,10 +16,16 @@ from config.app_config import (
     MONKEY_MODE,
     TEST_MODE,
 )
-from config.constants import COVER_LETTER_DIR, OUTPUT_DIR_LINKEDIN, RESUME_DIR, SEARCH_CONFIG_FILE
+from config.constants import (
+    COVER_LETTER_DIR,
+    OUTPUT_DIR_LINKEDIN,
+    RESUME_DIR,
+    SEARCH_CONFIG_FILE,
+)
 from config.logger_config import logger
 from src.dashboard.runtime import StopRequested, emit_event
 from src.job_manager.job_manager import BaseJobManager
+from src.utils.runtime_control import ShutdownState, get_shutdown_state
 
 try:
     from config.app_config import IS_PREMIUM
@@ -27,7 +33,9 @@ except ImportError:
     IS_PREMIUM = False
 
 if IS_PREMIUM:
-    from src.job_manager.linkedin.easy_applier_linkedin_premium import LinkedInEasyApplier
+    from src.job_manager.linkedin.easy_applier_linkedin_premium import (
+        LinkedInEasyApplier,
+    )
 else:
     from src.job_manager.linkedin.easy_applier_linkedin import LinkedInEasyApplier
 
@@ -53,7 +61,11 @@ class LinkedInJobManager(BaseJobManager):
     """Class for searching and sending applications to employers"""
 
     def __init__(
-        self, page: Page, linkedin_email: str, resume_anonymizer: Any, search_component: Any
+        self,
+        page: Page,
+        linkedin_email: str,
+        resume_anonymizer: Any,
+        search_component: Any,
     ):
         logger.info("Initializing LinkedInJobManager")
         self.page = page
@@ -227,6 +239,12 @@ class LinkedInJobManager(BaseJobManager):
                 if self.pause_checker:
                     await self.pause_checker()
 
+                # Check if shutdown was requested — stop starting new jobs
+                if get_shutdown_state() == ShutdownState.DRAINING:
+                    logger.info("Shutdown requested, finishing current job then stopping")
+                    result = "Shutdown"
+                    break
+
                 url = vacancy.get("url")
                 try:
                     result = await self.apply_job(vacancy)
@@ -255,7 +273,7 @@ class LinkedInJobManager(BaseJobManager):
                 else:
                     self.error_num = 0
             # break the search for vacancies if the limit is reached
-            if result == "Limit" or result == "Error":
+            if result == "Limit" or result == "Error" or result == "Shutdown":
                 break
             # go to the next page
             if not await self._go_to_next_page():
@@ -403,13 +421,14 @@ class LinkedInJobManager(BaseJobManager):
                 if not self._is_target_closed_error(e):
                     logger.warning(f"Failed to close job page: {e}")
             self.page = original_page
-            try:
-                await self.page.bring_to_front()
-            except Exception as e:
-                if self._is_target_closed_error(e):
-                    logger.warning("Browser was closed before returning to the search page")
-                else:
-                    raise
+            if get_shutdown_state() != ShutdownState.DRAINING:
+                try:
+                    await self.page.bring_to_front()
+                except Exception as e:
+                    if self._is_target_closed_error(e):
+                        logger.warning("Browser was closed before returning to the search page")
+                    else:
+                        raise
 
     async def easy_apply(self, job: Job) -> Tuple[str, str]:
         """Apply to the vacancy using LinkedIn Easy Apply functionality (async)"""
@@ -425,7 +444,10 @@ class LinkedInJobManager(BaseJobManager):
             TEST_MODE,
         )
         easy_applier_component.set_page(self.page)
-        apply_result, self.submitted_resume_path = await easy_applier_component.apply_to_job(job)
+        (
+            apply_result,
+            self.submitted_resume_path,
+        ) = await easy_applier_component.apply_to_job(job)
         applied_at = getattr(easy_applier_component, "already_applied_at", None)
         applied_at_text = getattr(easy_applier_component, "already_applied_at_text", None)
         self.already_applied_at = applied_at if isinstance(applied_at, str) else None
@@ -870,7 +892,9 @@ class LinkedInJobManager(BaseJobManager):
         target_page_label = self.page_num + 2  # page_num is 0-indexed; LinkedIn labels pages from 1
         logger.info(f"Going to the page {target_page_label}")
         emit_event(
-            "page_changed", f"Moving to page {target_page_label}", page_num=target_page_label
+            "page_changed",
+            f"Moving to page {target_page_label}",
+            page_num=target_page_label,
         )
 
         # Try multiple selectors for next page button
