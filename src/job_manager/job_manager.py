@@ -7,7 +7,13 @@ from typing import Any, Dict, List, Tuple
 
 import yaml
 
-from config.app_config import COLLECT_INFO_MODE, JOB_SITE, MAX_APPLIES_NUM, TEST_MODE
+from config.app_config import (
+    COLLECT_INFO_MODE,
+    JOB_SITE,
+    MAX_APPLIES_NUM,
+    RESET_SEEN_COMPANIES,
+    TEST_MODE,
+)
 from config.constants import OUTPUT_DIR_INDEED, OUTPUT_DIR_LINKEDIN
 from config.logger_config import logger
 from src.dashboard.runtime import emit_event
@@ -59,6 +65,12 @@ class BaseJobManager(ABC):
         self.success_companies = self._load_companies_from_yaml("success.yaml")
         self.skipped_companies = self._load_companies_from_yaml("skipped.yaml")
         self.failed_companies = self._load_companies_from_yaml("failed.yaml")
+        if RESET_SEEN_COMPANIES:
+            logger.info(
+                "RESET_SEEN_COMPANIES is enabled — clearing skipped and failed company lists"
+            )
+            self.skipped_companies = {}
+            self.failed_companies = {}
         self.seen_answers = self._load_data_from_yaml("answers.yaml")
         self.skill_stat = self._load_data_from_yaml("skill_stat.yaml")
         self.interesting_jobs = self._load_data_from_yaml("interesting_jobs.yaml")
@@ -345,14 +357,25 @@ class BaseJobManager(ABC):
                     logger.warning("The vacancy has already been encountered, skipping")
                     return True, "The vacancy has already been encountered"
         else:
+            # Company-wide skip: ONLY check success_companies
+            # (skipped/failed companies are not blockers — those jobs were never applied to)
+            if self.apply_once_at_company:
+                is_seen, reason = self._match_seen_jobs(job, self.success_companies)
+                if is_seen:
+                    return True, reason
+
+            # Exact job-title match: check ALL three lists
             for companies in (
                 self.success_companies,
                 self.skipped_companies,
                 self.failed_companies,
             ):
-                is_seen, reason = self._match_seen_jobs(job, companies)
-                if is_seen:
-                    return True, reason
+                for comp in companies:
+                    if sanitize_text(company_name) == sanitize_text(comp):
+                        for job_info in companies[comp]:
+                            if job_title == job_info["job_title"]:
+                                logger.warning("The vacancy has already been encountered, skipping")
+                                return True, "The vacancy has already been encountered"
         return False, ""
 
     def _check_the_previous_apply_number(self) -> int:
