@@ -29,7 +29,12 @@ from config.constants import (
     SEARCH_CONFIG_FILE,
 )
 from config.logger_config import logger
-from src.dashboard.runtime import StopRequested, emit_event, get_control_state, update_control_state
+from src.dashboard.runtime import (
+    StopRequested,
+    emit_event,
+    get_control_state,
+    update_control_state,
+)
 
 if JOB_SITE == "indeed":
     from src.job_manager.indeed.authenticator_indeed import IndeedAuthenticator as Authenticator
@@ -53,7 +58,11 @@ from src.pydantic_models.prompt_models import ResumeStructure
 from src.resume_builder.resume_generator import ResumeGenerator
 from src.resume_builder.resume_manager import ResumeManager
 from src.resume_builder.style_manager import StyleManager
-from src.utils.browser_utils import create_playwright_browser, save_browser_session, stop_tracing
+from src.utils.browser_utils import (
+    create_playwright_browser,
+    save_browser_session,
+    stop_tracing,
+)
 from src.utils.runtime_control import (
     register_shutdown_handlers,
     runtime_controller,
@@ -362,7 +371,8 @@ async def create_and_run_bot(
                 "Last search was less than a day ago, finishing work. If you want to restart the search, delete the file data/output/last_run.yaml file"
             )
             emit_event(
-                "run_stopped", "Run skipped because the daily restart window is still active"
+                "run_stopped",
+                "Run skipped because the daily restart window is still active",
             )
             return True
 
@@ -384,7 +394,11 @@ async def create_and_run_bot(
 
     finally:
         # Cleanup browser resources
+        import src.utils.runtime_control as rc
+        from src.utils.runtime_control import ShutdownState
+
         logger.info("Cleaning up browser resources...")
+        rc._shutdown_state = ShutdownState.CLEANUP
         try:
             if context is not None:
                 await save_browser_session(context)
@@ -400,6 +414,7 @@ async def create_and_run_bot(
         except Exception as e:
             logger.warning(f"Error during browser cleanup: {e}")
         finally:
+            rc._shutdown_state = ShutdownState.DONE
             # Local runtime patch: release any pending shutdown handler waits.
             runtime_controller.finish_run()
 
