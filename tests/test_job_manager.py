@@ -198,7 +198,10 @@ class TestCacheManagement:
             "total_applies_num": 100,
         }
 
-        with patch("builtins.open", mock_open()), patch("yaml.safe_load", return_value=cache_data):
+        with (
+            patch("builtins.open", mock_open()),
+            patch("yaml.safe_load", return_value=cache_data),
+        ):
             cache = job_applier._load_cache()
 
             assert cache.last_run == "2025-10-14T10:00:00"
@@ -633,7 +636,7 @@ class TestJobSeenChecking:
         assert "vacancy has already been encountered" in reason
 
     def test_job_is_already_seen_when_skipped_before(self, job_applier):
-        """Test skipped jobs are treated as already seen"""
+        """Test skipped jobs are NOT treated as already seen (only success blocks)"""
         job_applier.success_companies = {}
         job_applier.skipped_companies = {
             "Tech Corp": [{"job_title": "Software Engineer", "url": "http://test.com"}]
@@ -646,8 +649,8 @@ class TestJobSeenChecking:
         with patch("src.job_manager.job_manager.COLLECT_INFO_MODE", False):
             is_seen, reason = job_applier._job_is_already_seen(job)
 
-        assert is_seen is True
-        assert "vacancy has already been encountered" in reason
+        assert is_seen is False
+        assert reason == ""
 
 
 class TestPagination:
@@ -660,7 +663,8 @@ class TestPagination:
 
         with (
             patch(
-                "src.job_manager.linkedin.job_manager_linkedin.safe_click", new_callable=AsyncMock
+                "src.job_manager.linkedin.job_manager_linkedin.safe_click",
+                new_callable=AsyncMock,
             ) as mock_click,
             patch(
                 "src.job_manager.linkedin.job_manager_linkedin.find_element_safely",
@@ -681,7 +685,8 @@ class TestPagination:
         job_applier.page_num = 1
 
         with patch(
-            "src.job_manager.linkedin.job_manager_linkedin.safe_click", new_callable=AsyncMock
+            "src.job_manager.linkedin.job_manager_linkedin.safe_click",
+            new_callable=AsyncMock,
         ) as mock_click:
             mock_click.return_value = True
 
@@ -750,13 +755,19 @@ class TestInterestingJobs:
             job_applier.job_key_skills = []
 
             job1 = Job(
-                job_title="Job 1", company_name="Corp 1", url="https://linkedin.com/jobs/view/1"
+                job_title="Job 1",
+                company_name="Corp 1",
+                url="https://linkedin.com/jobs/view/1",
             )
             job2 = Job(
-                job_title="Job 2", company_name="Corp 2", url="https://linkedin.com/jobs/view/2"
+                job_title="Job 2",
+                company_name="Corp 2",
+                url="https://linkedin.com/jobs/view/2",
             )
             job3 = Job(
-                job_title="Job 3", company_name="Corp 3", url="https://linkedin.com/jobs/view/3"
+                job_title="Job 3",
+                company_name="Corp 3",
+                url="https://linkedin.com/jobs/view/3",
             )
 
             job_applier._save_interesting_job(job1, score=70, reasoning="Good")
@@ -1013,7 +1024,9 @@ class TestHandleApplyResult:
         mock_save_interesting.assert_called_once_with(job, score=82, reasoning=apply_result[1])
 
     @pytest.mark.asyncio
-    async def test_handle_apply_result_easy_apply_dialog_skip_saved_as_interesting(self, job_applier):
+    async def test_handle_apply_result_easy_apply_dialog_skip_saved_as_interesting(
+        self, job_applier
+    ):
         job_applier.applies_num = 0
         job_applier.success_applies_num = 0
         job_applier.total_applies_num = 0
@@ -1182,7 +1195,9 @@ class TestResumeImprovementRecommendations:
 
         with (
             patch.object(
-                job_applier, "_define_output_file", return_value=Path("/mock/resume_recs.txt")
+                job_applier,
+                "_define_output_file",
+                return_value=Path("/mock/resume_recs.txt"),
             ),
             patch("builtins.open", mock_open(read_data="Existing recommendations")),
         ):
@@ -1201,7 +1216,9 @@ class TestResumeImprovementRecommendations:
         mock_file = mock_open(read_data="")
         with (
             patch.object(
-                job_applier, "_define_output_file", return_value=Path("/mock/resume_recs.txt")
+                job_applier,
+                "_define_output_file",
+                return_value=Path("/mock/resume_recs.txt"),
             ),
             patch("builtins.open", mock_file),
         ):
@@ -1224,7 +1241,9 @@ class TestResumeImprovementRecommendations:
 
         with (
             patch.object(
-                job_applier, "_define_output_file", return_value=Path("/mock/resume_recs.txt")
+                job_applier,
+                "_define_output_file",
+                return_value=Path("/mock/resume_recs.txt"),
             ),
             patch("builtins.open", side_effect=open_side_effect),
         ):

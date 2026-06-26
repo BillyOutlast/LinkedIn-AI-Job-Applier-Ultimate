@@ -364,18 +364,14 @@ class BaseJobManager(ABC):
                 if is_seen:
                     return True, reason
 
-            # Exact job-title match: check ALL three lists
-            for companies in (
-                self.success_companies,
-                self.skipped_companies,
-                self.failed_companies,
-            ):
-                for comp in companies:
-                    if sanitize_text(company_name) == sanitize_text(comp):
-                        for job_info in companies[comp]:
-                            if job_title == job_info["job_title"]:
-                                logger.warning("The vacancy has already been encountered, skipping")
-                                return True, "The vacancy has already been encountered"
+            # Exact job-title match: only check success_companies
+            # (skipped/failed are not blockers — we never actually applied there)
+            for comp in self.success_companies:
+                if sanitize_text(company_name) == sanitize_text(comp):
+                    for job_info in self.success_companies[comp]:
+                        if job_title == job_info["job_title"]:
+                            logger.warning("The vacancy has already been encountered, skipping")
+                            return True, "The vacancy has already been encountered"
         return False, ""
 
     def _check_the_previous_apply_number(self) -> int:
