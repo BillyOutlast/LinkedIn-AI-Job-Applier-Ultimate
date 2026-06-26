@@ -33,8 +33,14 @@ from config.constants import LOG_DIR, RESUME_DIR, cost_per_token
 from config.logger_config import logger
 from src.dashboard.runtime import emit_event
 from src.pydantic_models.log_models import LLMCall
-from src.pydantic_models.prompt_models import LinkedInMessageClassification, ResumeStructure
-from src.utils.json_to_readable import transform_search_config_data, transform_vacancy_data
+from src.pydantic_models.prompt_models import (
+    LinkedInMessageClassification,
+    ResumeStructure,
+)
+from src.utils.json_to_readable import (
+    transform_search_config_data,
+    transform_vacancy_data,
+)
 from src.utils.utils import append_yaml_file, pause
 
 load_dotenv()
@@ -51,7 +57,11 @@ class GeminiModel(AIModel):
 
     def __init__(self, api_key: str, llm_model: str, llm_proxy: str = None) -> None:
         from google.genai import types
-        from langchain_google_genai import ChatGoogleGenerativeAI, HarmBlockThreshold, HarmCategory
+        from langchain_google_genai import (
+            ChatGoogleGenerativeAI,
+            HarmBlockThreshold,
+            HarmCategory,
+        )
 
         # os.environ["https_proxy"] = llm_proxy
         http_options = types.HttpOptions(
@@ -250,6 +260,43 @@ class CerebrasModel(AIModel):
         return response
 
 
+class OpenAICompatibleModel(AIModel):
+    """Get access to models via any OpenAI-compatible endpoint"""
+
+    def __init__(
+        self, api_key: str, llm_model: str, llm_api_url: str, llm_proxy: str = None
+    ) -> None:
+        from langchain_openai import ChatOpenAI
+
+        if not llm_api_url:
+            raise ValueError("llm_api_url is required for openai_compatible model type")
+
+        http_client = httpx.Client(proxy=llm_proxy) if llm_proxy else None
+        self.model_name = llm_model
+        is_reasoning_model = (
+            "o1" in self.model_name
+            or "o3" in self.model_name
+            or "o4" in self.model_name
+            or "gpt-5" in self.model_name
+        )
+        extra = {"reasoning_effort": "minimal"} if is_reasoning_model else {}
+        self.model = ChatOpenAI(
+            model_name=self.model_name,
+            openai_api_key=api_key,
+            openai_api_base=llm_api_url,
+            http_client=http_client,
+            temperature=1 if is_reasoning_model or "gpt-5" in self.model_name else TEMPERATURE,
+            timeout=60,
+            **extra,
+        )
+
+    def invoke(self, prompt: ChatPromptTemplate) -> BaseMessage:
+        logger.info("Got access to model via OpenAI-compatible endpoint")
+        prompt_messages = [SystemMessage(content=prompts.custom_instructions)] + prompt.messages
+        response = self.model.invoke(prompt_messages)
+        return response
+
+
 # class xAIModel(AIModel):
 #     """Get access to xAI model"""
 
@@ -323,6 +370,8 @@ class AIAdapter:
             if not api_key:
                 raise ValueError("API key is required for Cerebras model")
             return CerebrasModel(api_key, self.easy_apply_model, llm_proxy)
+        elif self.model_type == "openai_compatible":
+            return OpenAICompatibleModel(api_key, self.easy_apply_model, llm_api_url, llm_proxy)
         # elif self.model_type == "xai":
         #     return xAIModel(api_key, self.easy_apply_model)
         # elif self.model_type == "huggingface":
@@ -338,7 +387,10 @@ class AIAdapter:
                 first_request_timestamp = self.free_tier_request_queue.popleft()
                 time_delta = datetime.now() - first_request_timestamp
                 if time_delta < timedelta(seconds=60):
-                    pause(60 - time_delta.total_seconds(), 60 - time_delta.total_seconds() + 1)
+                    pause(
+                        60 - time_delta.total_seconds(),
+                        60 - time_delta.total_seconds() + 1,
+                    )
             self.free_tier_request_queue.append(datetime.now())
         return self.model.invoke(prompt)
 
@@ -590,7 +642,10 @@ class LoggerChatModel:
                     # Create a minimal parsed result with defaults
                     parsed_result = {
                         "content": llmresult.content if hasattr(llmresult, "content") else "",
-                        "response_metadata": {"model_name": "unknown", "finish_reason": "unknown"},
+                        "response_metadata": {
+                            "model_name": "unknown",
+                            "finish_reason": "unknown",
+                        },
                         "id": llmresult.id if hasattr(llmresult, "id") else "",
                         "usage_metadata": {
                             "input_tokens": 0,
@@ -735,7 +790,11 @@ class GPTAnswerer:
 
     def _set_current_job_context(self, job: Dict[str, Any] | None) -> None:
         if not job:
-            self.current_job_context = {"job_url": "", "job_title": "", "company_name": ""}
+            self.current_job_context = {
+                "job_url": "",
+                "job_title": "",
+                "company_name": "",
+            }
             return
 
         job_url = str(job.get("url") or "")
@@ -945,7 +1004,10 @@ class GPTAnswerer:
         logger.info("Parsing resume with structured output")
         chain, parser = self.chains["parse_resume"]
         output = chain.invoke(
-            {"resume": resume_text, "format_instructions": parser.get_format_instructions()}
+            {
+                "resume": resume_text,
+                "format_instructions": parser.get_format_instructions(),
+            }
         )
         logger.debug(f"Structured resume parsing completed: {output}")
         return output.model_dump()
@@ -1010,7 +1072,11 @@ class GPTAnswerer:
         return output
 
     def answer_question_textual_wide_range_with_error(
-        self, question: str, error: str, previous_answer: str, previous_questions: list[str]
+        self,
+        question: str,
+        error: str,
+        previous_answer: str,
+        previous_questions: list[str],
     ) -> str:
         """Answer question with error"""
         current_date = datetime.now().date().strftime("%Y-%m-%d")
@@ -1504,7 +1570,9 @@ class GPTAnswerer:
             self.resume_template_dir.mkdir(parents=True)
         try:
             with open(
-                self.resume_template_dir / f"{template_name}.html", "r", encoding="utf-8"
+                self.resume_template_dir / f"{template_name}.html",
+                "r",
+                encoding="utf-8",
             ) as f:
                 resume_template = f.read()
                 return resume_template

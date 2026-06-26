@@ -3,7 +3,15 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from browser_use import Agent, Browser, ChatAnthropic, ChatGoogle, ChatOllama, ChatOpenAI, Tools
+from browser_use import (
+    Agent,
+    Browser,
+    ChatAnthropic,
+    ChatGoogle,
+    ChatOllama,
+    ChatOpenAI,
+    Tools,
+)
 from browser_use.tools.views import UploadFileAction
 
 from config.app_config import APPLY_AGENT_MODEL, HEADLESS_MODE, LLM_MODEL_TYPE
@@ -95,6 +103,14 @@ class ApplyAgent:
                 api_key=self.api_key,
                 model=self.model,
                 base_url="https://api.cerebras.ai/v1",
+            )
+        elif model_type == "openai_compatible":
+            if not llm_api_url:
+                raise ValueError("llm_api_url is required for openai_compatible model type")
+            llm = ChatOpenAI(
+                api_key=self.api_key,
+                model=self.model,
+                base_url=llm_api_url,
             )
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
@@ -195,7 +211,10 @@ class ApplyAgent:
     def _log_token_usage(self, task: str) -> None:
         """Log AI Agent token usage and calculate the total cost"""
         token_usage = self.agent.token_cost_service.get_usage_tokens_for_model(self.model)
-        input_tokens, output_tokens = token_usage.prompt_tokens, token_usage.completion_tokens
+        input_tokens, output_tokens = (
+            token_usage.prompt_tokens,
+            token_usage.completion_tokens,
+        )
         total_tokens = input_tokens + output_tokens
         logger.info(
             f"Token usage - Input: {input_tokens}, Output: {output_tokens}, Total: {total_tokens}"
@@ -244,7 +263,10 @@ class ApplyAgent:
         except Exception as e:
             logger.error(f"Error applying to job: {e}")
             emit_event(
-                "agent_apply_failed", "External apply agent failed", url=job_url, error=str(e)
+                "agent_apply_failed",
+                "External apply agent failed",
+                url=job_url,
+                error=str(e),
             )
             return ("Error", str(e))
 
@@ -274,7 +296,9 @@ if __name__ == "__main__":
 
             # Initialize ApplyAgent
             apply_agent = ApplyAgent(
-                llm_api_key, BROWSER_STORAGE_STATE, user_email=secrets.get("linkedin_email", "")
+                llm_api_key,
+                BROWSER_STORAGE_STATE,
+                user_email=secrets.get("linkedin_email", ""),
             )
             logger.info("ApplyAgent initialized successfully")
 

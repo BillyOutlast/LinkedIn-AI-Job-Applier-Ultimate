@@ -153,6 +153,7 @@ Possible values:
     - "nvidia_nim"
     - "groq"
     - "cerebras"
+    - "openai_compatible"
 """
 LLM_MODEL_TYPE = "openrouter"
 # LLM_MODEL_TYPE = "openai"
