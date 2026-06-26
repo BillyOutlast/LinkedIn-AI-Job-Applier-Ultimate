@@ -3,10 +3,29 @@ import ctypes
 import os
 import signal
 import time
+from enum import Enum
 from threading import Event
 from typing import Any
 
 from config.logger_config import logger
+
+
+class ShutdownState(Enum):
+    """State machine for graceful shutdown"""
+
+    RUNNING = "running"
+    DRAINING = "draining"  # Current job finishing, no new jobs started
+    CLEANUP = "cleanup"  # Browser cleanup in progress
+    DONE = "done"
+
+
+_shutdown_state = ShutdownState.RUNNING
+
+
+def get_shutdown_state() -> ShutdownState:
+    """Get the current shutdown state"""
+    return _shutdown_state
+
 
 _shutdown_handlers_registered = False
 _windows_console_handler = None
@@ -29,7 +48,11 @@ class RuntimeController:
         self.cleanup_complete.set()
 
     def request_shutdown(self, source: str) -> None:
-        if not self.shutdown_requested.is_set():
+        global _shutdown_state
+        if _shutdown_state == ShutdownState.RUNNING:
+            _shutdown_state = ShutdownState.DRAINING
+            logger.warning(f"Shutdown requested via {source} — finishing current job before exit")
+        elif not self.shutdown_requested.is_set():
             logger.warning(f"Shutdown requested via {source}. Finishing current cleanup.")
         self.shutdown_requested.set()
 
@@ -166,9 +189,7 @@ async def sleep_with_shutdown(seconds: int) -> bool:
 
 def countdown_before_restart(seconds: int = 5) -> bool:
     """Give the user a short window to cancel restart after browser closure."""
-    logger.warning(
-        "I can reopen the browser and continue. Press Ctrl+C now to stop applications."
-    )
+    logger.warning("I can reopen the browser and continue. Press Ctrl+C now to stop applications.")
     for remaining in range(seconds, 0, -1):
         if runtime_controller.is_shutdown_requested():
             logger.info("Restart cancelled by shutdown request")
