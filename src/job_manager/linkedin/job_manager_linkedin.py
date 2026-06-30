@@ -19,8 +19,10 @@ from config.app_config import (
 from config.constants import (
     COVER_LETTER_DIR,
     OUTPUT_DIR_LINKEDIN,
+    OUTPUT_DIR_WORKDAY,
     RESUME_DIR,
     SEARCH_CONFIG_FILE,
+    WORKDAY_SESSION_DIR,
 )
 from config.logger_config import logger
 from src.dashboard.runtime import StopRequested, emit_event
@@ -49,6 +51,7 @@ from src.utils.browser_utils import (
     get_element_text,
     is_scrollable,
     safe_click,
+    save_browser_session,
     scroll_slowly,
 )
 from src.utils.utils import async_pause, load_yaml_file, sanitize_text
@@ -383,6 +386,33 @@ class LinkedInJobManager(BaseJobManager):
                     if apply_url:
                         if TEST_MODE:
                             apply_result = "Skip", "Test mode"
+                        elif "myworkdayjobs.com" in apply_url:
+                            from src.job_manager.workday import WorkdayApplier
+                            from src.job_manager.workday.workday_authenticator import (
+                                WorkdayAuthenticator,
+                            )
+                            from src.job_manager.workday.workday_questions import (
+                                WorkdayQuestionHandler,
+                            )
+
+                            authenticator = WorkdayAuthenticator(
+                                page=self.page,
+                                session_dir=Path(WORKDAY_SESSION_DIR),
+                                storage_writer=save_browser_session,
+                            )
+                            question_handler = WorkdayQuestionHandler(
+                                cache_path=Path(OUTPUT_DIR_WORKDAY) / "answers.yaml",
+                                llm_answerer=self.llm_answerer_component,
+                            )
+                            workday_applier = WorkdayApplier(
+                                page=self.page,
+                                resume_structured=self.resume_structured or {},
+                                resume_pdf_path=self.submitted_resume_path
+                                or Path(RESUME_DIR) / "default.pdf",
+                                question_handler=question_handler,
+                                authenticator=authenticator,
+                            )
+                            apply_result = await workday_applier.apply_to_job(apply_url)
                         else:
                             apply_result = await self.llm_agent_component.apply_to_job(apply_url)
                     else:
