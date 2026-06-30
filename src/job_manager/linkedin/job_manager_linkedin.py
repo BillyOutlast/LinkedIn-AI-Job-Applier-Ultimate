@@ -952,9 +952,12 @@ class LinkedInJobManager(BaseJobManager):
 
     def _record_encounter_with_capture(self, url: str, outcome: str) -> None:
         """Same as _record_encounter but also captures a DOM fingerprint for non-Workday outcomes."""
-        from src.discovery.ats_discoverer import record_encounter_with_page
+        from src.discovery.ats_discoverer import (
+            CAPTURE_OUTCOMES,
+            record_encounter_with_page,
+        )
 
-        if outcome in {"sent-to-browser-use", "skipped-known-ats", "error"}:
+        if outcome in CAPTURE_OUTCOMES:
             record_encounter_with_page(self.page, url, outcome)
         else:
             from src.discovery.ats_discoverer import record_encounter

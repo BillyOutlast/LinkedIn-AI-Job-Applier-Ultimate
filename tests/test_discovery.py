@@ -112,13 +112,15 @@ def test_record_encounter_is_noop_when_log_path_unset(tmp_path):
 
 
 def test_capture_fingerprint_returns_dict_or_capture_failed():
-    """Mocked page returns a dict; failure path returns capture-failed."""
-    fp = capture_fingerprint(MagicMock(), "https://example.invalid/apply")
-    assert isinstance(fp, dict)
-    assert "title" in fp or "fingerprint_status" in fp
+    """On page.goto failure, result is exactly the capture-failed dict shape."""
+    page = MagicMock()
+    page.goto = MagicMock(side_effect=RuntimeError("boom"))
+    fp = capture_fingerprint(page, "https://example.invalid/apply")
+    assert fp == {"fingerprint_status": "capture-failed", "error": "boom"}
 
 
 def test_record_encounter_with_page_writes_capture(tmp_path, monkeypatch):
+    """Locks in the duplicate-line design: lines[0] has no fingerprint_path, lines[1] does."""
     import src.discovery.ats_discoverer as mod
 
     log = tmp_path / "encountered.jsonl"
@@ -132,17 +134,9 @@ def test_record_encounter_with_page_writes_capture(tmp_path, monkeypatch):
         "capture_fingerprint",
         lambda page, url: {"title": "Apply Now", "headings": ["Apply Now"]},
     )
-    monkeypatch.setattr(
-        mod,
-        "_capture_to_disk",
-        lambda url, page, captures_dir: captures_dir / "fake.json",
-    )
-
-    # Stub _capture_to_disk
-    from pathlib import Path
 
     def fake_capture_to_disk(url, page, cdir):
-        p = cdir / f"fake.json"
+        p = cdir / "fake.json"
         p.write_text('{"title": "Apply Now"}')
         return p
 
@@ -153,6 +147,10 @@ def test_record_encounter_with_page_writes_capture(tmp_path, monkeypatch):
     )
     with open(log) as f:
         lines = [l for l in f.readlines() if l.strip()]
-    assert len(lines) >= 1
-    last = json.loads(lines[-1])
-    assert "fingerprint_path" in last
+    # The first line is the bare encounter entry (no fingerprint_path).
+    # The second line is the capture correlation entry (has fingerprint_path).
+    assert len(lines) == 2, f"expected exactly 2 lines, got {len(lines)}: {lines!r}"
+    first = json.loads(lines[0])
+    second = json.loads(lines[1])
+    assert "fingerprint_path" not in first
+    assert "fingerprint_path" in second

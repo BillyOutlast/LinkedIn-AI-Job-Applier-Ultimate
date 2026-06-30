@@ -17,6 +17,9 @@ from config.logger_config import logger
 
 _DISCOVERY_LOG_PATH: Path | None = None
 
+# Outcomes that warrant a DOM fingerprint capture (vs. plain record_encounter)
+CAPTURE_OUTCOMES: frozenset[str] = frozenset({"sent-to-browser-use", "skipped-known-ats", "error"})
+
 _KNOWN_SIGNATURES = (
     "myworkdayjobs",
     "phenom",
@@ -200,3 +203,80 @@ def summarize(jsonl_path: Path) -> str:
             lines.append(f"- `{e.get('fingerprint_path')}` — {e.get('host')} ({e.get('outcome')})")
 
     return "\n".join(lines) + "\n"
+
+
+async def run_discovery(
+    search_config: dict | None = None,
+    secrets: dict | None = None,
+    resume_text: str = "",
+    resume_structured: dict | None = None,
+) -> int:
+    """Operator entry point: run the bot under discovery mode.
+
+    Sets `_DISCOVERY_LOG_PATH` so `_record_encounter` calls (from each
+    dispatcher's apply_url branch) append to a per-session JSONL log.
+    Writes `summary.md` next to that log on completion. Delegates the
+    bot run to `main.create_and_run_bot`, whose existing dispatcher
+    hooks do all the recording.
+
+    Any args that are not supplied are read from the bot's normal
+    ConfigValidator pipeline (search config from
+    `config/search_config.yaml`, secrets from `.env`, resume from
+    `RESUME_TEXT_FILE` / `RESUME_STRUCTURED_FILE`). This keeps the
+    `python -m src.discovery.ats_discoverer` invocation zero-config
+    for operators who already have a working `main.py` setup.
+    """
+    import asyncio
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    from config.constants import SEARCH_CONFIG_FILE
+    from config.logger_config import logger
+    from main import ConfigValidator, create_and_run_bot
+    from src.utils.utils import load_yaml_file
+
+    if search_config is None or secrets is None or resume_structured is None:
+        validator = ConfigValidator()
+        if search_config is None:
+            search_config = validator.validate_search_config(SEARCH_CONFIG_FILE)
+        if secrets is None:
+            secrets = validator.validate_secrets()
+        if not resume_text and not resume_structured:
+            from config.constants import RESUME_STRUCTURED_FILE, RESUME_TEXT_FILE
+
+            resume_text = validator.validate_resume_text(RESUME_TEXT_FILE)
+            resume_structured = validator.validate_resume_structured(RESUME_STRUCTURED_FILE)
+
+    session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_") + uuid4().hex[:8]
+    discovery_root = Path("data/output/discovery/sessions") / session_id
+    discovery_root.mkdir(parents=True, exist_ok=True)
+    log_path = discovery_root / "encountered.jsonl"
+    log_path.touch()
+
+    global _DISCOVERY_LOG_PATH
+    _DISCOVERY_LOG_PATH = log_path
+    logger.info(f"Discovery mode active; logging to {log_path}")
+
+    try:
+        await create_and_run_bot(
+            search_config=search_config,
+            secrets=secrets,
+            resume_text=resume_text,
+            resume_structured=resume_structured or {},
+        )
+    except Exception as e:
+        logger.error(f"Bot run under discovery mode failed: {e}")
+    finally:
+        # Always write the summary, even on partial runs.
+        summary_path = discovery_root / "summary.md"
+        summary_path.write_text(summarize(log_path))
+        logger.info(f"Discovery summary written to {summary_path}")
+        _DISCOVERY_LOG_PATH = None
+
+    return 0
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    raise SystemExit(asyncio.run(run_discovery()))
