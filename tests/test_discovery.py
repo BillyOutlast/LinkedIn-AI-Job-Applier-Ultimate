@@ -186,7 +186,6 @@ def test_capture_fingerprint_includes_network_hostnames():
             listeners.append(handler)
 
     page.on = fake_on
-    page.goto = AsyncMock()
     page.title = AsyncMock(return_value="Apply Now")
     page.evaluate = AsyncMock(
         side_effect=[
@@ -198,18 +197,24 @@ def test_capture_fingerprint_includes_network_hostnames():
         ]
     )
 
-    import asyncio
+    request_urls = [
+        "https://api.greenhouse.io/v1/x",
+        "https://boards.greenhouse.io/y",
+    ]
 
-    async def run_capture():
-        captured = capture_fingerprint(page, "https://example.com/apply")
-        for url in ["https://api.greenhouse.io/v1/x", "https://boards.greenhouse.io/y"]:
+    async def fake_goto(url, timeout=None):
+        # Fire registered request listeners synchronously, simulating
+        # network activity during navigation. This is the point at which
+        # `_capture_async` would observe them.
+        for u in request_urls:
             for h in listeners:
                 req = MagicMock()
-                req.url = url
+                req.url = u
                 h(req)
-        return captured
 
-    fp = asyncio.run(run_capture())
+    page.goto = fake_goto
+
+    fp = capture_fingerprint(page, "https://example.com/apply")
     assert "network_hostnames" in fp
     assert "api.greenhouse.io" in fp["network_hostnames"]
     assert "boards.greenhouse.io" in fp["network_hostnames"]
