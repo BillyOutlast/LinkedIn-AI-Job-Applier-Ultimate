@@ -153,6 +153,14 @@ class LinkedInEasyApplier(BaseEasyApplier):
                 # Click 'Continue Applying' button if it appears
                 await self._click_continue_applying_button()
                 await async_pause()
+                # ponytail: LinkedIn's Easy Apply now navigates to /jobs/view/{id}/apply/?
+                # instead of opening a modal. Wait for that URL transition (10s) before
+                # form-filling kicks in. Falls through if URL doesn't change (legacy modal).
+                try:
+                    await self.page.wait_for_url("**/jobs/view/*/apply/**", timeout=10000)
+                    logger.debug("Navigated to LinkedIn apply page")
+                except Exception as e:
+                    logger.debug(f"No URL transition to /apply/ (legacy modal?): {e}")
                 # Check for premium redirect
                 if not await self.check_for_premium_redirect(self.current_job):
                     break

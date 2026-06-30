@@ -161,6 +161,61 @@ class TestEasyApplyButtonDetection:
             ]
             assert "easy_apply_button_hidden" in hidden_labels
 
+    @pytest.mark.asyncio
+    async def test_job_easy_apply_waits_for_url_transition_after_click(self, easy_applier):
+        """After Easy Apply click, wait for /apply/ URL before filling form."""
+        job = Job(
+            job_title="VP Engineering",
+            company_name="Example",
+            url="https://www.linkedin.com/jobs/view/12345",
+        )
+
+        easy_applier.page.wait_for_url = AsyncMock()
+        easy_applier.page.url = "https://www.linkedin.com/jobs/view/12345/apply/?foo=bar"
+
+        with (
+            patch.object(
+                easy_applier,
+                "check_for_premium_redirect",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(
+                easy_applier,
+                "_check_easy_apply_limit",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch(f"{MODULE}.find_elements_safely", new_callable=AsyncMock) as mock_find,
+            patch(f"{MODULE}.debug_capture", new_callable=AsyncMock),
+            patch(f"{MODULE}.async_pause", new_callable=AsyncMock),
+            patch.object(
+                easy_applier,
+                "_is_already_applied",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(easy_applier, "_click_continue_applying_button", new_callable=AsyncMock),
+            patch.object(easy_applier, "_fill_application_form", new_callable=AsyncMock),
+        ):
+            button = AsyncMock()
+            button.is_visible = AsyncMock(return_value=True)
+            button.is_enabled = AsyncMock(return_value=True)
+            button.first = AsyncMock()
+            button.first.bounding_box = AsyncMock(
+                return_value={"x": 100, "y": 200, "width": 120, "height": 32}
+            )
+            button.first.click = AsyncMock()
+            mock_find.return_value = [button]
+
+            await easy_applier.job_easy_apply(job)
+
+            easy_applier.page.wait_for_url.assert_awaited()
+            url_pattern = easy_applier.page.wait_for_url.await_args.args[0]
+            assert (
+                "apply" in url_pattern.lower()
+            ), f"Expected /apply/ in wait_for_url pattern, got: {url_pattern}"
+
 
 class TestModalDetection:
     @pytest.mark.asyncio
