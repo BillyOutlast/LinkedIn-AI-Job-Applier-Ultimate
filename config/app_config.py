@@ -108,7 +108,7 @@ Possible values:
     - "Default"
     - "Clean Blue"
 """
-RESUME_STYLE = None
+RESUME_STYLE = "FAANGPath"
 
 """
 If LLM evaluated the 'interest' level of the job not below this threshold - the job is considered interesting for application.
