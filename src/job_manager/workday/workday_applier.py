@@ -5,17 +5,21 @@ Top-level apply_to_job mirrors ApplyAgent's contract so the dispatch site
 can use it as a drop-in.
 """
 
+import json
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.async_api import Page
 
 from config.app_config import HEADLESS_MODE
+from config.constants import WORKDAY_SCREENSHOT_DIR
 from config.logger_config import logger
 from src.dashboard.runtime import emit_event
 from src.job_manager.workday.workday_authenticator import WorkdayAuthenticator
 from src.job_manager.workday.workday_questions import WorkdayQuestionHandler
 from src.job_manager.workday.workday_selectors import (
+    APPLICATION_CONFIRMATION,
     APPLY_FLOW_CONTAINER,
     DISCLOSURE_RADIO_GROUP,
     EDUCATION_ADD_BUTTON,
@@ -23,9 +27,16 @@ from src.job_manager.workday.workday_selectors import (
     EDUCATION_END_DATE,
     EDUCATION_SCHOOL,
     EDUCATION_START_DATE,
+    QUESTION_CHECKBOX,
+    QUESTION_DROPDOWN,
+    QUESTION_RADIO,
+    QUESTION_TEXT_INPUT,
+    QUESTION_TEXTAREA,
     RESUME_UPLOAD_INPUT,
+    REVIEW_PAGE_INDICATOR,
     SAVE_AND_CONTINUE,
     SKILLS_INPUT,
+    SUBMIT_BUTTON,
     WORK_HISTORY_ADD_BUTTON,
     WORK_HISTORY_DESCRIPTION,
     WORK_HISTORY_EMPLOYER,
@@ -102,7 +113,7 @@ class WorkdayApplier:
         await find_element_safely(self.page, APPLY_FLOW_CONTAINER, "css")
 
     async def _fill_account_if_needed(self, tenant: str) -> bool:
-        raise NotImplementedError
+        return await self.authenticator.ensure_session(tenant, email=self._account_email(tenant))
 
     async def _fill_my_experience(self) -> bool:
         if not await self._upload_resume():
@@ -176,7 +187,94 @@ class WorkdayApplier:
             return False
 
     async def _answer_custom_questions(self) -> bool:
-        raise NotImplementedError
+        questions = await self._scrape_questions()
+        if not questions:
+            return await self._click_save_and_continue()
+        answers = self.question_handler.answer(
+            questions, context={"resume": str(self.resume_structured), "job": {}}
+        )
+        if not await self._apply_answers(answers):
+            return False
+        return await self._click_save_and_continue()
+
+    async def _scrape_questions(self) -> list[dict]:
+        """Scrape visible question labels and infer field type from nearest input."""
+        try:
+            return await self.page.evaluate("""() => {
+                    const labels = Array.from(document.querySelectorAll('[data-automation-id="questionnaireLabel"], label'));
+                    return labels.map(l => {
+                        const text = (l.textContent || '').trim();
+                        if (!text) return null;
+                        const root = l.closest('div') || document;
+                        const input = root.querySelector('input[type=text], textarea, select, input[type=radio], input[type=checkbox]');
+                        let type = 'text';
+                        if (input) {
+                            if (input.tagName === 'TEXTAREA') type = 'textarea';
+                            else if (input.tagName === 'SELECT') type = 'dropdown';
+                            else if (input.type === 'radio') type = 'radio';
+                            else if (input.type === 'checkbox') type = 'checkbox';
+                        }
+                        const required = !!(root.querySelector('[aria-required=true]') || root.querySelector('[required]'));
+                        const options = input && input.tagName === 'SELECT'
+                            ? Array.from(input.options).map(o => o.text)
+                            : [];
+                        return { text, type, required, options };
+                    }).filter(Boolean);
+                }""") or []
+        except Exception as e:
+            logger.warning(f"Question scrape failed: {e}")
+            return []
+
+    async def _apply_answers(self, answers: dict[str, str]) -> bool:
+        for text, answer in answers.items():
+            try:
+                label = self.page.locator(f"label:has-text('{text}')").first
+                root = label.locator("xpath=ancestor::div[1]")
+                if await root.locator(QUESTION_TEXTAREA).count():
+                    await root.locator(QUESTION_TEXTAREA).first.fill(answer)
+                elif await root.locator(QUESTION_TEXT_INPUT).count():
+                    await root.locator(QUESTION_TEXT_INPUT).first.fill(answer)
+                elif await root.locator(QUESTION_DROPDOWN).count():
+                    await root.locator(QUESTION_DROPDOWN).first.select_option(label=answer)
+                elif await root.locator(QUESTION_RADIO).count():
+                    await self.page.locator(
+                        f"label:has-text('{answer}') >> input[type=radio]"
+                    ).first.click()
+                elif await root.locator(QUESTION_CHECKBOX).count():
+                    await self.page.locator(
+                        f"label:has-text('{answer}') >> input[type=checkbox]"
+                    ).first.click()
+            except Exception as e:
+                logger.warning(f"Answer apply failed for '{text}': {e}")
+        return True
 
     async def _review_and_submit(self) -> tuple[str, str]:
-        raise NotImplementedError
+        try:
+            await self._wait_for_review_page()
+            if not await self._assert_no_required_errors():
+                return ("Error", "Review page shows required-field errors")
+            if not await self._click_submit():
+                return ("Error", "Submit button click failed")
+            await self.page.wait_for_selector(APPLICATION_CONFIRMATION, timeout=15000)
+            shot = await self._capture_success_screenshot()
+            return ("Success", shot)
+        except Exception as e:
+            logger.error(f"Review/submit failed: {e}", exc_info=True)
+            await debug_capture(self.page, "workday_review_submit_fail")
+            return ("Error", str(e))
+
+    async def _wait_for_review_page(self) -> None:
+        await self.page.wait_for_selector(REVIEW_PAGE_INDICATOR, timeout=10000)
+
+    async def _assert_no_required_errors(self) -> bool:
+        return (await self.page.locator("text=Required").count()) == 0
+
+    async def _click_submit(self) -> bool:
+        return await safe_click(self.page, SUBMIT_BUTTON)
+
+    async def _capture_success_screenshot(self) -> str:
+        out = Path(WORKDAY_SCREENSHOT_DIR)
+        out.mkdir(parents=True, exist_ok=True)
+        path = out / f"workday_{int(time.time())}.png"
+        await self.page.screenshot(path=str(path))
+        return str(path)

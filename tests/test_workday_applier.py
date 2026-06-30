@@ -96,3 +96,36 @@ async def test_fill_voluntary_disclosures_defaults_to_prefer_not_to_answer(
     assert ok is True
     assert deps._select_prefer_not_to_answer.await_count == 2
     deps._click_save_and_continue.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_answer_custom_questions_uses_handler(deps: WorkdayApplier) -> None:
+    deps._scrape_questions = AsyncMock(
+        return_value=[{"text": "Why?", "type": "textarea", "required": True}]
+    )  # type: ignore[method-assign]
+    deps._apply_answers = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    deps._click_save_and_continue = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    deps.question_handler.answer = MagicMock(return_value={"Why?": "Because."})
+
+    ok = await deps._answer_custom_questions()
+
+    assert ok is True
+    deps.question_handler.answer.assert_called_once()
+    deps._apply_answers.assert_awaited_once_with({"Why?": "Because."})
+    deps._click_save_and_continue.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_review_and_submit_submits(deps: WorkdayApplier) -> None:
+    deps._wait_for_review_page = AsyncMock()  # type: ignore[method-assign]
+    deps._assert_no_required_errors = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    deps._click_submit = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    deps._capture_success_screenshot = AsyncMock(
+        return_value="data/output/screenshots/uhaul_x.png"
+    )  # type: ignore[method-assign]
+    deps.page.wait_for_selector = AsyncMock()  # type: ignore[method-assign]
+
+    result, reason = await deps._review_and_submit()
+
+    assert result == "Success"
+    assert reason == "data/output/screenshots/uhaul_x.png"
