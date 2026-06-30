@@ -49,7 +49,8 @@ def ensure_playwright_profile() -> str:
     session_dir = os.path.dirname(BROWSER_STORAGE_STATE)
     if not os.path.exists(session_dir):  # TODO: add for back compatibility, remove this later
         session_dir_new = os.path.join(
-            session_dir, "/".join(BROWSER_STORAGE_STATE.split("/")[:-1]) + "/linkedin_state.json"
+            session_dir,
+            "/".join(BROWSER_STORAGE_STATE.split("/")[:-1]) + "/linkedin_state.json",
         )
         if not os.path.exists(session_dir_new):
             os.makedirs(session_dir)
@@ -150,6 +151,13 @@ async def save_browser_session(context: BrowserContext) -> None:
     try:
         ensure_playwright_profile()
         storage_state = await context.storage_state()
+
+        # ponytail: Playwright's storage_state() omits empty arrays. The reader
+        # (browser.new_context) is strict and rejects origins without a
+        # localStorage key. Normalize before writing.
+        for origin in storage_state.get("origins", []):
+            origin.setdefault("localStorage", [])
+        storage_state.setdefault("cookies", [])
 
         with open(BROWSER_STORAGE_STATE, "w") as f:
             import json
@@ -522,15 +530,13 @@ async def is_scrollable(element) -> bool:
             return False
 
         # Use JavaScript to get scroll properties directly from DOM
-        is_scrollable_result = await locator.evaluate(
-            """
+        is_scrollable_result = await locator.evaluate("""
             (element) => {
                 const verticalScrollable = element.scrollHeight > element.clientHeight;
                 const horizontalScrollable = element.scrollWidth > element.clientWidth;
                 return verticalScrollable || horizontalScrollable;
             }
-        """
-        )
+        """)
 
         return bool(is_scrollable_result)
 
@@ -540,7 +546,10 @@ async def is_scrollable(element) -> bool:
 
 
 async def scroll_slowly(
-    locator: Any, direction: str = "down", time_to_scroll_sec: float = 1.5, delay: float = 0.01
+    locator: Any,
+    direction: str = "down",
+    time_to_scroll_sec: float = 1.5,
+    delay: float = 0.01,
 ) -> bool:
     """
     Scroll an element in the specified direction (Playwright compatible) - async
@@ -629,11 +638,9 @@ async def HTML_to_PDF(FilePath):
         logger.info(f"Page loaded: {file_url}")
 
         # Wait for fonts to load
-        await page.evaluate(
-            """
+        await page.evaluate("""
             () => document.fonts.ready
-        """
-        )
+        """)
 
         # Additional wait to ensure all styles are applied
         await asyncio.sleep(1)
