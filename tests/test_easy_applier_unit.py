@@ -114,6 +114,50 @@ class TestEasyApplyButtonDetection:
             )
             assert label_arg == "easy_apply_button_missing"
 
+    @pytest.mark.asyncio
+    async def test_find_easy_apply_button_skips_hidden_button(self, easy_applier):
+        """A hidden Easy Apply button must not be clicked; debug_capture must fire."""
+        job = Job(
+            job_title="VP Engineering",
+            company_name="Example",
+            url="https://www.linkedin.com/jobs/view/12345",
+        )
+        hidden_button = AsyncMock()
+        hidden_button.is_visible = AsyncMock(return_value=True)
+        hidden_button.is_enabled = AsyncMock(return_value=True)
+        hidden_button.first = AsyncMock()
+        hidden_button.first.bounding_box = AsyncMock(
+            return_value={"x": 0, "y": 0, "width": 0, "height": 0}
+        )
+        click_attempted = False
+
+        async def maybe_click(*args, **kwargs):
+            nonlocal click_attempted
+            click_attempted = True
+
+        hidden_button.first.click = AsyncMock(side_effect=maybe_click)
+        with (
+            patch.object(easy_applier, "check_for_premium_redirect", new_callable=AsyncMock),
+            patch.object(
+                easy_applier, "_check_easy_apply_limit", new_callable=AsyncMock
+            ) as mock_limit,
+            patch(f"{MODULE}.find_elements_safely", new_callable=AsyncMock) as mock_find,
+            patch(f"{MODULE}.debug_capture", new_callable=AsyncMock) as mock_capture,
+            patch(f"{MODULE}.async_pause", new_callable=AsyncMock),
+        ):
+            mock_limit.return_value = False
+            mock_find.return_value = [hidden_button]
+
+            result = await easy_applier._find_easy_apply_button(job)
+
+            assert result is False
+            assert click_attempted is False, "hidden button must NOT be clicked"
+            hidden_labels = [
+                call.args[1] if len(call.args) > 1 else call.kwargs.get("label")
+                for call in mock_capture.await_args_list
+            ]
+            assert "easy_apply_button_hidden" in hidden_labels
+
 
 class TestNextButtonDetection:
     @pytest.mark.asyncio

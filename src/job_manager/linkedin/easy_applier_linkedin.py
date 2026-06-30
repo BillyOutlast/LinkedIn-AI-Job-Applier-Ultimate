@@ -263,6 +263,18 @@ class LinkedInEasyApplier(BaseEasyApplier):
                     if not (await button.is_visible() and await button.is_enabled()):
                         logger.debug("Apply button is not visible or enabled")
                         continue
+                    # ponytail: LinkedIn gates Easy Apply by hiding the button from render
+                    # when it detects automation. is_visible() returns true (DOM-present)
+                    # but bounding rect is zero (offsetParent === null). Clicking a hidden
+                    # button fires the JS event but LinkedIn's handler is a no-op, so the
+                    # modal never opens. Detect and skip instead.
+                    bbox = await button.first.bounding_box()
+                    if not bbox or bbox.get("width", 0) == 0 or bbox.get("height", 0) == 0:
+                        logger.debug(
+                            "Apply button hidden from render (zero bounding box), skipping"
+                        )
+                        await debug_capture(self.page, "easy_apply_button_hidden")
+                        continue
                     await button.first.click(timeout=1000)
                     return True
                 except Exception as e:
