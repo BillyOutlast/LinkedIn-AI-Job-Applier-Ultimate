@@ -502,25 +502,46 @@ class LinkedInEasyApplier(BaseEasyApplier):
                     logger.debug(f"Easy Apply modal content found with selector: {selector}")
                     break
 
-            if modal_content is None:
-                logger.error("Easy Apply modal content not found on the page with any selector")
-                await debug_capture(self.page, "easy_apply_modal_missing")
-                if await self._is_already_applied():
-                    raise NoInfoException("Already applied to this job")
-                raise NoInfoException("Easy Apply dialog did not open")
+            form_root = modal_content  # may be None if no modal
 
-            logger.debug("Easy Apply modal content found successfully")
+            # ponytail: LinkedIn's new Easy Apply navigates to /jobs/view/{id}/apply/
+            # instead of opening a modal. If no modal found, check for the new in-page
+            # apply form via its H2 "Apply to <company>" heading, then operate on the
+            # page itself. Detecting either path lets jobs that haven't migrated yet
+            # (legacy modal) keep working.
+            if form_root is None:
+                apply_heading_selectors = [
+                    'xpath=//h2[contains(text(), "Apply to")]',
+                    'xpath=//h1[contains(text(), "Apply to")]',
+                    'xpath=//*[contains(text(), "/") and contains(text(), "pages") and not(self::script)]',
+                ]
+                apply_indicator = None
+                for selector in apply_heading_selectors:
+                    apply_indicator = await find_element_safely(self.page, selector, "xpath")
+                    if apply_indicator is not None:
+                        logger.debug(f"Apply page detected with selector: {selector}")
+                        break
+                if apply_indicator is None:
+                    logger.error("Easy Apply form not found (no modal, no apply page)")
+                    await debug_capture(self.page, "easy_apply_form_missing")
+                    if await self._is_already_applied():
+                        raise NoInfoException("Already applied to this job")
+                    raise NoInfoException("Easy Apply dialog did not open")
+                form_root = self.page
+
+            logger.debug("Easy Apply form root resolved")
 
             # Track processed file inputs to avoid duplicate processing
             processed_file_inputs = set()
 
-            # Find all form elements using the correct selectors
-            form_elements = await modal_content.locator(".fb-dash-form-element").all()
+            # Find all form elements using the correct selectors (form_root is either
+            # the modal or the page itself on the new in-page flow).
+            form_elements = await form_root.locator(".fb-dash-form-element").all()
             logger.debug(f"Found {len(form_elements)} form elements")
 
             if not form_elements:
                 # Fallback to the old selector if new one doesn't work
-                form_elements = await modal_content.locator(
+                form_elements = await form_root.locator(
                     "xpath=.//*[contains(@class, 'jobs-easy-apply-form-section__group')]"
                 ).all()
                 logger.debug(
