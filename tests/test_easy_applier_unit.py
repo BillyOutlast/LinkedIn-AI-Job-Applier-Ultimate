@@ -13,6 +13,7 @@ MODULE = "src.job_manager.linkedin.easy_applier_linkedin"
 def easy_applier():
     page = MagicMock()
     page.wait_for_selector = AsyncMock()
+    page.reload = AsyncMock()
     page.locator.return_value.all = AsyncMock(return_value=[])
 
     with (
@@ -79,6 +80,39 @@ class TestEasyApplyButtonDetection:
 
             assert result is True
             button.first.click.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_find_easy_apply_button_captures_debug_when_not_found(self, easy_applier):
+        """When the button is not found, debug_capture must run before returning False."""
+        job = Job(
+            job_title="VP Engineering",
+            company_name="Example",
+            url="https://www.linkedin.com/jobs/view/12345",
+        )
+
+        with (
+            patch.object(easy_applier, "check_for_premium_redirect", new_callable=AsyncMock),
+            patch.object(
+                easy_applier, "_check_easy_apply_limit", new_callable=AsyncMock
+            ) as mock_limit,
+            patch(f"{MODULE}.find_elements_safely", new_callable=AsyncMock) as mock_find,
+            patch(f"{MODULE}.debug_capture", new_callable=AsyncMock) as mock_capture,
+            patch(f"{MODULE}.async_pause", new_callable=AsyncMock),
+        ):
+            mock_limit.return_value = False
+            mock_find.return_value = []  # no buttons at all
+
+            result = await easy_applier._find_easy_apply_button(job)
+
+            assert result is False
+            mock_capture.assert_awaited_once()
+            # Second positional arg of the await is the label
+            label_arg = (
+                mock_capture.await_args.args[1]
+                if len(mock_capture.await_args.args) > 1
+                else mock_capture.await_args.kwargs.get("label")
+            )
+            assert label_arg == "easy_apply_button_missing"
 
 
 class TestNextButtonDetection:

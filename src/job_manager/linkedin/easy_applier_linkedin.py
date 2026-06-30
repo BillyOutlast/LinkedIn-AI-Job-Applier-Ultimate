@@ -280,6 +280,9 @@ class LinkedInEasyApplier(BaseEasyApplier):
         logger.warning(
             f"No clickable 'Easy Apply' button found after 2 attempts. page url: {page_url}"
         )
+        # ponytail: capture before returning False so DEBUG_MODE produces ground truth
+        # for the next selector change. The capture is a no-op when DEBUG_MODE=False.
+        await debug_capture(self.page, "easy_apply_button_missing")
         return False
 
     async def _click_continue_applying_button(self) -> None:
