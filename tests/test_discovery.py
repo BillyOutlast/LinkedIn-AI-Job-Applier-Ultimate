@@ -160,11 +160,34 @@ def test_discovery_auto_init_when_flag_enabled(tmp_path, monkeypatch):
     """When DISCOVERY=True and log path unset, _auto_init sets the path."""
     import src.discovery.ats_discoverer as mod
 
+    # Redirect session discovery root to tmp_path so the test does not
+    # touch the real `data/output/discovery/sessions` tree.
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir()
+
+    real_Path = mod.Path
+
+    class _PathSandbox(real_Path):
+        pass
+
+    def _patched_Path(arg=""):
+        # Both call sites pass either a relative string ("data/output/discovery/sessions")
+        # or a sub-path built on the session_dir. Map the hard-coded root
+        # to tmp_path/sessions and let everything else resolve naturally.
+        s = str(arg)
+        if s == "data/output/discovery/sessions":
+            return real_Path(str(sessions_dir))
+        return real_Path(arg)
+
+    monkeypatch.setattr(mod, "Path", _patched_Path)
     monkeypatch.setattr(mod, "_DISCOVERY_LOG_PATH", None)
     monkeypatch.setattr("config.app_config.DISCOVERY", True, raising=False)
     mod._auto_init_discovery()
     assert mod._DISCOVERY_LOG_PATH is not None
     assert mod._DISCOVERY_LOG_PATH.name == "encountered.jsonl"
+    # captures/ subdir must exist next to the log file (used by
+    # record_encounter_with_page when a fingerprint is captured).
+    assert (mod._DISCOVERY_LOG_PATH.parent / "captures").is_dir()
 
 
 def test_discovery_no_auto_init_when_flag_disabled(tmp_path, monkeypatch):
@@ -185,7 +208,16 @@ def test_capture_fingerprint_includes_network_hostnames():
         if event == "request":
             listeners.append(handler)
 
+    def fake_off(event, handler):
+        # Mirror `page.on` so cleanup is observable from the listener list.
+        if event == "request":
+            try:
+                listeners.remove(handler)
+            except ValueError:
+                pass
+
     page.on = fake_on
+    page.off = fake_off
     page.title = AsyncMock(return_value="Apply Now")
     page.evaluate = AsyncMock(
         side_effect=[
@@ -218,3 +250,41 @@ def test_capture_fingerprint_includes_network_hostnames():
     assert "network_hostnames" in fp
     assert "api.greenhouse.io" in fp["network_hostnames"]
     assert "boards.greenhouse.io" in fp["network_hostnames"]
+
+
+def test_capture_fingerprint_removes_request_listener():
+    """After _capture_async returns, the page's 'request' listener is detached.
+
+    The bot shares the same page object for the post-discovery Easy Apply
+    flow, so a leaked listener would silently mutate a dead `hostnames`
+    set on every later navigation. This locks the cleanup contract.
+    """
+    page = MagicMock()
+    on_handlers: list = []
+    off_calls: list = []
+
+    def fake_on(event, handler):
+        if event == "request":
+            on_handlers.append(handler)
+
+    def fake_off(event, handler):
+        if event == "request":
+            off_calls.append(handler)
+
+    page.on = fake_on
+    page.off = fake_off
+    page.title = AsyncMock(return_value="Apply")
+    page.evaluate = AsyncMock(side_effect=[[], [], [], [], 0])
+
+    async def fake_goto(url, timeout=None):
+        for h in on_handlers:
+            h(MagicMock(url="https://x.example.com/"))
+
+    page.goto = fake_goto
+
+    capture_fingerprint(page, "https://example.com/apply")
+    assert on_handlers, "expected request listener to be registered"
+    assert off_calls, "expected page.off to be called for cleanup"
+    assert (
+        off_calls[0] is on_handlers[0]
+    ), "page.off must receive the same handler passed to page.on"

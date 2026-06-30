@@ -71,34 +71,53 @@ def record_encounter(url: str, outcome: str, signature: str = "") -> None:
 
 async def _capture_async(page: Any, url: str) -> dict:
     hostnames: set[str] = set()
+
+    def _on_request(req: Any) -> None:
+        try:
+            hostnames.add(urlparse(req.url).netloc.lower())
+        except Exception:
+            pass
+
+    handler = _on_request
     try:
-        page.on("request", lambda req: hostnames.add(urlparse(req.url).netloc.lower()))
+        page.on("request", handler)
     except Exception:
-        pass
-    await page.goto(url, timeout=15000)
-    title = await page.title()
-    headings = await page.evaluate(
-        "() => Array.from(document.querySelectorAll('h1,h2')).map(h => h.textContent.trim()).filter(Boolean).slice(0, 10)"
-    )
-    inputs = await page.evaluate(
-        "() => Array.from(document.querySelectorAll('input,select,textarea')).map(i => i.tagName.toLowerCase() + (i.type ? ':' + i.type : ''))"
-    )
-    buttons = await page.evaluate(
-        "() => Array.from(document.querySelectorAll('button')).map(b => b.textContent.trim()).filter(t => t && t.length < 60).slice(0, 20)"
-    )
-    classes = await page.evaluate(
-        "() => { const s = new Set(); document.querySelectorAll('*[class]').forEach(e => { e.className && e.className.toString().split(/\\s+/).forEach(c => { if (c.length > 4 && c.length < 40) s.add(c); }); }); return Array.from(s).slice(0, 200); }"
-    )
-    iframes = await page.evaluate("() => document.querySelectorAll('iframe').length")
-    return {
-        "title": title,
-        "headings": headings or [],
-        "form_input_types": inputs or [],
-        "button_labels": buttons or [],
-        "ats_marker_classes": classes or [],
-        "iframe_count": iframes,
-        "network_hostnames": sorted(hostnames),
-    }
+        handler = None  # registration failed; skip cleanup below
+    try:
+        await page.goto(url, timeout=15000)
+        title = await page.title()
+        headings = await page.evaluate(
+            "() => Array.from(document.querySelectorAll('h1,h2')).map(h => h.textContent.trim()).filter(Boolean).slice(0, 10)"
+        )
+        inputs = await page.evaluate(
+            "() => Array.from(document.querySelectorAll('input,select,textarea')).map(i => i.tagName.toLowerCase() + (i.type ? ':' + i.type : ''))"
+        )
+        buttons = await page.evaluate(
+            "() => Array.from(document.querySelectorAll('button')).map(b => b.textContent.trim()).filter(t => t && t.length < 60).slice(0, 20)"
+        )
+        classes = await page.evaluate(
+            "() => { const s = new Set(); document.querySelectorAll('*[class]').forEach(e => { e.className && e.className.toString().split(/\\s+/).forEach(c => { if (c.length > 4 && c.length < 40) s.add(c); }); }); return Array.from(s).slice(0, 200); }"
+        )
+        iframes = await page.evaluate("() => document.querySelectorAll('iframe').length")
+        return {
+            "title": title,
+            "headings": headings or [],
+            "form_input_types": inputs or [],
+            "button_labels": buttons or [],
+            "ats_marker_classes": classes or [],
+            "iframe_count": iframes,
+            "network_hostnames": sorted(hostnames),
+        }
+    finally:
+        # Detach the listener so the same page (e.g. the bot's main
+        # LinkedIn/Indeed page) doesn't keep firing our handler on every
+        # subsequent navigation. `page.off` is a no-op if the handler was
+        # never registered.
+        if handler is not None:
+            try:
+                page.off("request", handler)
+            except Exception:
+                pass
 
 
 def capture_fingerprint(page: Any, url: str) -> dict:
@@ -296,12 +315,6 @@ async def run_discovery(
     return 0
 
 
-if __name__ == "__main__":
-    import asyncio
-
-    raise SystemExit(asyncio.run(run_discovery()))
-
-
 def _auto_init_discovery() -> None:
     """If DISCOVERY flag is True, set up _DISCOVERY_LOG_PATH on import.
 
@@ -318,7 +331,11 @@ def _auto_init_discovery() -> None:
     if not DISCOVERY:
         return
     try:
-        session_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        from uuid import uuid4
+
+        # Include a UUID4 suffix so two auto-init calls within the same
+        # second don't collide (manual `run_discovery` already does this).
+        session_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8]
         session_dir = Path("data/output/discovery/sessions") / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
         (session_dir / "captures").mkdir(exist_ok=True)
@@ -330,3 +347,9 @@ def _auto_init_discovery() -> None:
 
 
 _auto_init_discovery()
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    raise SystemExit(asyncio.run(run_discovery()))
