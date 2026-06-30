@@ -8,6 +8,7 @@ can use it as a drop-in.
 import json
 import time
 from pathlib import Path
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from playwright.async_api import Page
@@ -83,14 +84,16 @@ class WorkdayApplier:
             return per_tenant
         return os.getenv("linkedin_email") or os.getenv("indeed_email") or ""
 
-    async def apply_to_job(self, url: str) -> tuple[str, str]:
+    async def apply_to_job(
+        self, url: str, job: Any = None
+    ) -> tuple[tuple[str, str], Optional[str]]:
         tenant = self._tenant_from_url(url)
         emit_event("workday_phase", f"Starting Workday apply tenant={tenant}", tenant=tenant)
 
         try:
             await self._navigate_to_apply(url)
             if not await self._fill_account_if_needed(tenant):
-                return ("Error", f"Account creation failed for tenant={tenant}")
+                return (("Error", f"Account creation failed for tenant={tenant}"), None)
             for phase_name, phase_fn in (
                 ("my_experience", self._fill_my_experience),
                 ("voluntary_disclosures", self._fill_voluntary_disclosures),
@@ -98,14 +101,14 @@ class WorkdayApplier:
             ):
                 ok = await phase_fn()
                 if not ok:
-                    return ("Error", f"Phase failed: {phase_name}")
-            result, reason = await self._review_and_submit()
+                    return (("Error", f"Phase failed: {phase_name}"), None)
+            result, reason = await self._review_and_submit(tenant)
             emit_event("workday_submitted", f"Submitted tenant={tenant}", tenant=tenant)
-            return (result, reason)
+            return ((result, reason), None)
         except Exception as e:
             logger.error(f"Workday apply crashed tenant={tenant}: {e}", exc_info=True)
             await debug_capture(self.page, f"workday_{tenant}_crash")
-            return ("Error", str(e))
+            return (("Error", str(e)), None)
 
     # --- Phase methods (implemented in Tasks 7-9) ----------------------------
     async def _navigate_to_apply(self, url: str) -> None:
@@ -190,8 +193,19 @@ class WorkdayApplier:
         questions = await self._scrape_questions()
         if not questions:
             return await self._click_save_and_continue()
+        # Anonymize resume PII before sending to LLM (security rule).
+        try:
+            from src.job_manager.resume_anonymizer import ResumeAnonymizer
+
+            anonymizer = ResumeAnonymizer(self.resume_structured or {})
+            anonymizer.anonymize_personal_information()
+            anonymized_resume = anonymizer.resume_anonymized
+        except Exception as e:
+            # If anonymization fails, fall back to empty resume rather than leak PII.
+            logger.warning(f"Resume anonymization failed; sending empty resume: {e}")
+            anonymized_resume = {}
         answers = self.question_handler.answer(
-            questions, context={"resume": str(self.resume_structured), "job": {}}
+            questions, context={"resume": str(anonymized_resume), "job": {}}
         )
         if not await self._apply_answers(answers):
             return False
@@ -248,7 +262,7 @@ class WorkdayApplier:
                 logger.warning(f"Answer apply failed for '{text}': {e}")
         return True
 
-    async def _review_and_submit(self) -> tuple[str, str]:
+    async def _review_and_submit(self, tenant: str = "unknown") -> tuple[str, str]:
         try:
             await self._wait_for_review_page()
             if not await self._assert_no_required_errors():
@@ -256,7 +270,7 @@ class WorkdayApplier:
             if not await self._click_submit():
                 return ("Error", "Submit button click failed")
             await self.page.wait_for_selector(APPLICATION_CONFIRMATION, timeout=15000)
-            shot = await self._capture_success_screenshot()
+            shot = await self._capture_success_screenshot(tenant)
             return ("Success", shot)
         except Exception as e:
             logger.error(f"Review/submit failed: {e}", exc_info=True)
@@ -272,10 +286,12 @@ class WorkdayApplier:
     async def _click_submit(self) -> bool:
         return await safe_click(self.page, SUBMIT_BUTTON)
 
-    async def _capture_success_screenshot(self) -> str:
+    async def _capture_success_screenshot(self, tenant: str = "unknown") -> str:
+        import uuid
+
         out = Path(WORKDAY_SCREENSHOT_DIR)
         out.mkdir(parents=True, exist_ok=True)
-        path = out / f"workday_{int(time.time())}.png"
+        path = out / f"workday_{tenant}_{int(time.time())}_{uuid.uuid4().hex[:6]}.png"
         await self.page.screenshot(path=str(path))
         return str(path)
 

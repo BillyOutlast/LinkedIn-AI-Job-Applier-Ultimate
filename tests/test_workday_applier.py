@@ -29,10 +29,11 @@ async def test_apply_to_job_returns_success_tuple(deps: WorkdayApplier) -> None:
     deps._answer_custom_questions = AsyncMock(return_value=True)  # type: ignore[method-assign]
     deps._review_and_submit = AsyncMock(return_value=("Success", "shot.png"))  # type: ignore[method-assign]
 
-    result, reason = await deps.apply_to_job("https://uhaul.myworkdayjobs.com/x/apply")
+    (result, reason), error = await deps.apply_to_job("https://uhaul.myworkdayjobs.com/x/apply")
 
     assert result == "Success"
     assert reason == "shot.png"
+    assert error is None
 
 
 @pytest.mark.asyncio
@@ -41,10 +42,11 @@ async def test_phase_failure_returns_error_tuple(deps: WorkdayApplier) -> None:
     deps._fill_account_if_needed = AsyncMock()  # type: ignore[method-assign]
     deps._fill_my_experience = AsyncMock(return_value=False)  # type: ignore[method-assign]
 
-    result, reason = await deps.apply_to_job("https://uhaul.myworkdayjobs.com/x/apply")
+    (result, reason), error = await deps.apply_to_job("https://uhaul.myworkdayjobs.com/x/apply")
 
     assert result == "Error"
     assert "my_experience" in reason
+    assert error is None
 
 
 @pytest.mark.asyncio

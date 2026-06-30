@@ -20,7 +20,7 @@ If this mode is activated, saves screenshots and page HTML to data/debug/ on eve
 Also enables Playwright tracing (saved to data/debug/trace.zip on exit, viewable at trace.playwright.dev).
 No-op when False (default).
 """
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 """
 If this mode is activated - apply to all vacancies indiscriminately,
@@ -54,7 +54,7 @@ In this mode app applies only the jobs with Easy Apply
 If this mode is deactivated, app will apply to the jobs with Easy Apply and try to apply to the jobs with 3rd party applications
 WARNING: applying to the jobs with 3rd party applications is not guaranteed to be successful, but is guaranteed to consume at least 10-100x more tokens
 """
-EASY_APPLY_ONLY_MODE = True
+EASY_APPLY_ONLY_MODE = False
 
 """
 If True - use the LinkedIn Premium Easy Apply flow (easy_applier_linkedin_premium.py).
@@ -95,7 +95,7 @@ READY_MADE_PHOTO_PATH = ""
 If True, clears skipped.yaml and failed.yaml on startup (keeps success.yaml).
 Useful after refining search criteria to re-attempt previously skipped/failed companies.
 """
-RESET_SEEN_COMPANIES = False
+RESET_SEEN_COMPANIES = True
 """
 Resume style to use for generated resumes.
 If set - skips the interactive style selection prompt.
