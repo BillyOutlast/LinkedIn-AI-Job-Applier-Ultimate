@@ -17,6 +17,7 @@ from src.job_manager.workday.workday_authenticator import WorkdayAuthenticator
 from src.job_manager.workday.workday_questions import WorkdayQuestionHandler
 from src.job_manager.workday.workday_selectors import (
     APPLY_FLOW_CONTAINER,
+    DISCLOSURE_RADIO_GROUP,
     EDUCATION_ADD_BUTTON,
     EDUCATION_DEGREE,
     EDUCATION_END_DATE,
@@ -35,6 +36,7 @@ from src.job_manager.workday.workday_selectors import (
 from src.utils.browser_utils import (
     debug_capture,
     find_element_safely,
+    find_elements_safely,
     safe_click,
     safe_fill,
 )
@@ -155,7 +157,27 @@ class WorkdayApplier:
         return await safe_click(self.page, SAVE_AND_CONTINUE)
 
     async def _fill_voluntary_disclosures(self) -> bool:
-        raise NotImplementedError
+        groups = await find_elements_safely(self.page, DISCLOSURE_RADIO_GROUP, "css")
+        if not await self._select_prefer_not_to_answer():
+            return False
+        for _ in groups:
+            if not await self._select_prefer_not_to_answer():
+                return False
+        return await self._click_save_and_continue()
+
+    async def _select_prefer_not_to_answer(self) -> bool:
+        """Click the 'Prefer not to answer' option inside the current disclosure group."""
+        try:
+            locator = self.page.locator(
+                "label:has-text('Prefer not to answer') input[type='radio']"
+            )
+            if await locator.count() == 0:
+                return True
+            await locator.first.click()
+            return True
+        except Exception as e:
+            logger.warning(f"Disclosure select failed: {e}")
+            return False
 
     async def _answer_custom_questions(self) -> bool:
         raise NotImplementedError

@@ -78,3 +78,17 @@ async def test_fill_my_experience_uploads_resume_and_saves(
     deps._add_education.assert_awaited_once()
     deps._add_skills.assert_awaited_once()
     deps._click_save_and_continue.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fill_voluntary_disclosures_defaults_to_prefer_not_to_answer(
+    deps: WorkdayApplier,
+) -> None:
+    deps._click_save_and_continue = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    deps._select_prefer_not_to_answer = AsyncMock(return_value=True)  # type: ignore[method-assign]
+
+    ok = await deps._fill_voluntary_disclosures()
+
+    assert ok is True
+    deps._select_prefer_not_to_answer.assert_awaited()
+    deps._click_save_and_continue.assert_awaited_once()
