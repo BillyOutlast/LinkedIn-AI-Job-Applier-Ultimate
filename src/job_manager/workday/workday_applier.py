@@ -15,7 +15,29 @@ from config.logger_config import logger
 from src.dashboard.runtime import emit_event
 from src.job_manager.workday.workday_authenticator import WorkdayAuthenticator
 from src.job_manager.workday.workday_questions import WorkdayQuestionHandler
-from src.utils.browser_utils import debug_capture
+from src.job_manager.workday.workday_selectors import (
+    APPLY_FLOW_CONTAINER,
+    EDUCATION_ADD_BUTTON,
+    EDUCATION_DEGREE,
+    EDUCATION_END_DATE,
+    EDUCATION_SCHOOL,
+    EDUCATION_START_DATE,
+    RESUME_UPLOAD_INPUT,
+    SAVE_AND_CONTINUE,
+    SKILLS_INPUT,
+    WORK_HISTORY_ADD_BUTTON,
+    WORK_HISTORY_DESCRIPTION,
+    WORK_HISTORY_EMPLOYER,
+    WORK_HISTORY_END_DATE,
+    WORK_HISTORY_START_DATE,
+    WORK_HISTORY_TITLE,
+)
+from src.utils.browser_utils import (
+    debug_capture,
+    find_element_safely,
+    safe_click,
+    safe_fill,
+)
 
 
 class WorkdayApplier:
@@ -74,13 +96,63 @@ class WorkdayApplier:
 
     # --- Phase methods (implemented in Tasks 7-9) ----------------------------
     async def _navigate_to_apply(self, url: str) -> None:
-        raise NotImplementedError
+        await self.page.goto(url, wait_until="domcontentloaded")
+        await find_element_safely(self.page, APPLY_FLOW_CONTAINER, "css")
 
     async def _fill_account_if_needed(self, tenant: str) -> bool:
         raise NotImplementedError
 
     async def _fill_my_experience(self) -> bool:
-        raise NotImplementedError
+        if not await self._upload_resume():
+            return False
+        if not await self._add_work_history():
+            return False
+        if not await self._add_education():
+            return False
+        if not await self._add_skills():
+            return False
+        return await self._click_save_and_continue()
+
+    async def _upload_resume(self) -> bool:
+        if not self.resume_pdf_path.exists():
+            return False
+        try:
+            await self.page.set_input_files(RESUME_UPLOAD_INPUT, str(self.resume_pdf_path))
+            return True
+        except Exception as e:
+            logger.error(f"Resume upload failed: {e}")
+            return False
+
+    async def _add_work_history(self) -> bool:
+        for entry in self.resume_structured.get("work_experience", []) or []:
+            if not await safe_click(self.page, WORK_HISTORY_ADD_BUTTON):
+                return False
+            await safe_fill(self.page, WORK_HISTORY_EMPLOYER, str(entry.get("employer", "")))
+            await safe_fill(self.page, WORK_HISTORY_TITLE, str(entry.get("title", "")))
+            await safe_fill(self.page, WORK_HISTORY_START_DATE, str(entry.get("start_date", "")))
+            await safe_fill(self.page, WORK_HISTORY_END_DATE, str(entry.get("end_date", "")))
+            await safe_fill(self.page, WORK_HISTORY_DESCRIPTION, str(entry.get("description", "")))
+        return True
+
+    async def _add_education(self) -> bool:
+        for entry in self.resume_structured.get("education", []) or []:
+            if not await safe_click(self.page, EDUCATION_ADD_BUTTON):
+                return False
+            await safe_fill(self.page, EDUCATION_SCHOOL, str(entry.get("school", "")))
+            await safe_fill(self.page, EDUCATION_DEGREE, str(entry.get("degree", "")))
+            await safe_fill(self.page, EDUCATION_START_DATE, str(entry.get("start_date", "")))
+            await safe_fill(self.page, EDUCATION_END_DATE, str(entry.get("end_date", "")))
+        return True
+
+    async def _add_skills(self) -> bool:
+        skills = self.resume_structured.get("skills") or []
+        if not skills:
+            return True
+        text = ", ".join(str(s) for s in skills)
+        return await safe_fill(self.page, SKILLS_INPUT, text)
+
+    async def _click_save_and_continue(self) -> bool:
+        return await safe_click(self.page, SAVE_AND_CONTINUE)
 
     async def _fill_voluntary_disclosures(self) -> bool:
         raise NotImplementedError

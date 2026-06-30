@@ -45,3 +45,36 @@ async def test_phase_failure_returns_error_tuple(deps: WorkdayApplier) -> None:
 
     assert result == "Error"
     assert "my_experience" in reason
+
+
+@pytest.mark.asyncio
+async def test_fill_my_experience_uploads_resume_and_saves(
+    deps: WorkdayApplier,
+) -> None:
+    deps.resume_structured = {
+        "work_experience": [
+            {
+                "employer": "Acme",
+                "title": "Eng",
+                "start_date": "2020-01",
+                "end_date": "2023-01",
+                "description": "Built things.",
+            }
+        ],
+        "education": [{"school": "MIT", "degree": "BS", "start_date": "2016", "end_date": "2020"}],
+        "skills": ["Python", "Playwright"],
+    }
+    deps._upload_resume = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    deps._add_work_history = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    deps._add_education = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    deps._add_skills = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    deps._click_save_and_continue = AsyncMock(return_value=True)  # type: ignore[method-assign]
+
+    ok = await deps._fill_my_experience()
+
+    assert ok is True
+    deps._upload_resume.assert_awaited_once()
+    deps._add_work_history.assert_awaited_once()
+    deps._add_education.assert_awaited_once()
+    deps._add_skills.assert_awaited_once()
+    deps._click_save_and_continue.assert_awaited_once()
