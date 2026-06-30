@@ -158,19 +158,15 @@ class WorkdayApplier:
 
     async def _fill_voluntary_disclosures(self) -> bool:
         groups = await find_elements_safely(self.page, DISCLOSURE_RADIO_GROUP, "css")
-        if not await self._select_prefer_not_to_answer():
-            return False
-        for _ in groups:
-            if not await self._select_prefer_not_to_answer():
+        for group in groups:
+            if not await self._select_prefer_not_to_answer(group):
                 return False
         return await self._click_save_and_continue()
 
-    async def _select_prefer_not_to_answer(self) -> bool:
-        """Click the 'Prefer not to answer' option inside the current disclosure group."""
+    async def _select_prefer_not_to_answer(self, group) -> bool:
+        """Click the 'Prefer not to answer' option inside the given disclosure group."""
         try:
-            locator = self.page.locator(
-                "label:has-text('Prefer not to answer') input[type='radio']"
-            )
+            locator = group.locator("label:has-text('Prefer not to answer') input[type='radio']")
             if await locator.count() == 0:
                 return True
             await locator.first.click()

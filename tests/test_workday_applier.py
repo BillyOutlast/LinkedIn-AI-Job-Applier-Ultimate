@@ -1,7 +1,7 @@
 """WorkdayApplier must dispatch through phases and return ApplyAgent-shaped tuples."""
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -86,9 +86,13 @@ async def test_fill_voluntary_disclosures_defaults_to_prefer_not_to_answer(
 ) -> None:
     deps._click_save_and_continue = AsyncMock(return_value=True)  # type: ignore[method-assign]
     deps._select_prefer_not_to_answer = AsyncMock(return_value=True)  # type: ignore[method-assign]
-
-    ok = await deps._fill_voluntary_disclosures()
+    # Mock find_elements_safely to return 2 fake group elements
+    with patch(
+        "src.job_manager.workday.workday_applier.find_elements_safely",
+        new=AsyncMock(return_value=[MagicMock(), MagicMock()]),
+    ):
+        ok = await deps._fill_voluntary_disclosures()
 
     assert ok is True
-    deps._select_prefer_not_to_answer.assert_awaited()
+    assert deps._select_prefer_not_to_answer.await_count == 2
     deps._click_save_and_continue.assert_awaited_once()
