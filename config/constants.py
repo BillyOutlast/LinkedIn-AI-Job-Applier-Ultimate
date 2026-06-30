@@ -41,6 +41,11 @@ BROWSER_STORAGE_STATE = "browser_session/browser_state.json"
 RESUME_TEXT_TEMPLATE_FILE = "examples/data/resumes/resume_text.txt"
 APP_CONFIG_FILE = "config/app_config.yaml"
 
+# Workday
+WORKDAY_SCREENSHOT_DIR = "data/output/screenshots"
+WORKDAY_SESSION_DIR = "browser_session"
+OUTPUT_DIR_WORKDAY = "data/output/workday"
+
 # Default cost per token fallback when model is not in PRICE_DICT
 CUSTOM_COST_PER_TOKEN = {
     "input_cost_per_token": 0.25 / 1_000_000,
