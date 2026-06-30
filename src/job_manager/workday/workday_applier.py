@@ -278,3 +278,62 @@ class WorkdayApplier:
         path = out / f"workday_{int(time.time())}.png"
         await self.page.screenshot(path=str(path))
         return str(path)
+
+
+if __name__ == "__main__":
+    """Smoke test against the Uhaul Workday job from the failure log."""
+    import asyncio
+    import traceback
+
+    import dotenv
+    from playwright.async_api import async_playwright
+
+    from config.app_config import HEADLESS_MODE
+    from config.constants import (
+        BROWSER_STORAGE_STATE,
+        OUTPUT_DIR_WORKDAY,
+        RESUME_DIR,
+        WORKDAY_SESSION_DIR,
+    )
+    from src.job_manager.workday.workday_authenticator import WorkdayAuthenticator
+    from src.job_manager.workday.workday_questions import WorkdayQuestionHandler
+    from src.pydantic_models.prompt_models import ResumeStructure
+    from src.utils.browser_utils import create_playwright_browser, save_browser_session
+    from src.utils.utils import load_yaml_file
+
+    UHAUL_URL = (
+        "https://uhaul.wd1.myworkdayjobs.com/en-US/UhaulJobs/job/"
+        "Augusta-Maine/Customer-Service-Representative_R249007/apply?source=LinkedIn"
+    )
+
+    async def smoke() -> bool:
+        secrets = dotenv.dotenv_values(".env")
+        resume_structured = load_yaml_file(Path(RESUME_DIR) / "structured_resume.yaml")
+        resume_structured = ResumeStructure(**resume_structured).model_dump()
+        resume_pdf = next(Path(RESUME_DIR).glob("*.pdf"), None)
+
+        browser, context, page = await create_playwright_browser(
+            storage_state=BROWSER_STORAGE_STATE
+        )
+        authenticator = WorkdayAuthenticator(page, Path(WORKDAY_SESSION_DIR), save_browser_session)
+        question_handler = WorkdayQuestionHandler(
+            Path(OUTPUT_DIR_WORKDAY) / "answers.yaml", llm_answerer=None
+        )
+        applier = WorkdayApplier(
+            page=page,
+            resume_structured=resume_structured,
+            resume_pdf_path=resume_pdf or Path("missing.pdf"),
+            question_handler=question_handler,
+            authenticator=authenticator,
+            headless=HEADLESS_MODE,
+        )
+        try:
+            result, reason = await applier.apply_to_job(UHAUL_URL)
+            print(f"Result: {result} | Reason: {reason}")
+            return result == "Success"
+        finally:
+            await context.close()
+            await browser.close()
+
+    success = asyncio.run(smoke())
+    print("PASS" if success else "FAIL")
