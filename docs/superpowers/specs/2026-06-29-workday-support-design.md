@@ -163,8 +163,9 @@ else:
 
 1. **Subdomain parse** — `tenant = url.split("//")[1].split(".")[0]` → `"uhaul"`
 2. **Account** — `await self.auth.ensure_session(tenant, email, storage_state_path)`
+   - Email source: `linkedin_email` from `.env` (existing field) for tenants reached via LinkedIn; `indeed_email` for Indeed; per-tenant override stored at `browser_session/workday_{tenant}.email`
    - Reads `browser_session/workday_{tenant}.json`
-   - Else: navigate, fill, submit, persist
+   - Else: navigate to `https://{tenant}/account/create`, fill email + password, submit, persist state to `browser_session/workday_{tenant}.json`
 3. **Apply page** — `await self._navigate_to_apply(url)` — waits for `data-automation-id='applyFlowContainer'`
 4. **My Experience phase**:
    - Resume upload: `input[type='file']` → `set_input_files` with PDF
