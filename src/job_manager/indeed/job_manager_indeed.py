@@ -14,7 +14,14 @@ from config.app_config import (
     MONKEY_MODE,
     TEST_MODE,
 )
-from config.constants import COVER_LETTER_DIR, OUTPUT_DIR_INDEED, RESUME_DIR, SEARCH_CONFIG_FILE
+from config.constants import (
+    COVER_LETTER_DIR,
+    OUTPUT_DIR_INDEED,
+    OUTPUT_DIR_WORKDAY,
+    RESUME_DIR,
+    SEARCH_CONFIG_FILE,
+    WORKDAY_SESSION_DIR,
+)
 from config.logger_config import logger
 from src.dashboard.runtime import StopRequested, emit_event
 from src.job_manager.indeed.easy_applier_indeed import IndeedEasyApplier
@@ -25,6 +32,7 @@ from src.utils.browser_utils import (
     find_element_safely,
     find_elements_safely,
     safe_click,
+    save_browser_session,
 )
 from src.utils.utils import async_pause, load_yaml_file, sanitize_text
 
@@ -53,7 +61,11 @@ class IndeedJobManager(BaseJobManager):
     """Class for searching and sending applications to employers on Indeed"""
 
     def __init__(
-        self, page: Page, linkedin_email: str, resume_anonymizer: Any, search_component: Any
+        self,
+        page: Page,
+        linkedin_email: str,
+        resume_anonymizer: Any,
+        search_component: Any,
     ):
         logger.info("Initializing IndeedJobManager")
         self.page = page
@@ -194,8 +206,7 @@ class IndeedJobManager(BaseJobManager):
 
     async def _scroll_left_panel(self) -> None:
         """Scroll the full page to trigger lazy-loading of job cards"""
-        await self.page.evaluate(
-            """
+        await self.page.evaluate("""
             () => new Promise((resolve) => {
                 const distance = document.body.scrollHeight;
                 const durationMs = 2000;
@@ -208,8 +219,7 @@ class IndeedJobManager(BaseJobManager):
                 }
                 requestAnimationFrame(step);
             })
-            """
-        )
+            """)
         await async_pause(1, 2)
         await self.page.evaluate("() => window.scrollTo(0, 0)")
 
@@ -259,7 +269,10 @@ class IndeedJobManager(BaseJobManager):
             else:
                 interest_result = self.llm_answerer_component.job_is_interesting(job.model_dump())
                 if interest_result is None:
-                    apply_result = ("Error", "Error while determining if job is interesting")
+                    apply_result = (
+                        "Error",
+                        "Error while determining if job is interesting",
+                    )
                     await self._handle_apply_result(apply_result, job, evaluation=evaluation)
                     return "Error"
                 job_is_interesting, score, reasoning = interest_result
@@ -297,7 +310,35 @@ class IndeedJobManager(BaseJobManager):
                     apply_result = "Skip", "Test mode"
                 else:
                     apply_url = await self._get_button_link(new_page)
-                    apply_result = await self.llm_agent_component.apply_to_job(apply_url)
+                    if "myworkdayjobs.com" in apply_url:
+                        from src.job_manager.workday import WorkdayApplier
+                        from src.job_manager.workday.workday_authenticator import (
+                            WorkdayAuthenticator,
+                        )
+                        from src.job_manager.workday.workday_questions import (
+                            WorkdayQuestionHandler,
+                        )
+
+                        authenticator = WorkdayAuthenticator(
+                            page=self.page,
+                            session_dir=Path(WORKDAY_SESSION_DIR),
+                            storage_writer=save_browser_session,
+                        )
+                        question_handler = WorkdayQuestionHandler(
+                            cache_path=Path(OUTPUT_DIR_WORKDAY) / "answers.yaml",
+                            llm_answerer=self.llm_answerer_component,
+                        )
+                        workday_applier = WorkdayApplier(
+                            page=self.page,
+                            resume_structured=self.resume_structured or {},
+                            resume_pdf_path=self.submitted_resume_path
+                            or Path(RESUME_DIR) / "default.pdf",
+                            question_handler=question_handler,
+                            authenticator=authenticator,
+                        )
+                        apply_result = await workday_applier.apply_to_job(apply_url)
+                    else:
+                        apply_result = await self.llm_agent_component.apply_to_job(apply_url)
             else:
                 apply_result = await self.easy_apply(job, new_page)
 
@@ -336,7 +377,10 @@ class IndeedJobManager(BaseJobManager):
             cover_letter_dir=Path(COVER_LETTER_DIR),
             test_mode=TEST_MODE,
         )
-        apply_result, self.submitted_resume_path = await easy_applier_component.apply_to_job(job)
+        (
+            apply_result,
+            self.submitted_resume_path,
+        ) = await easy_applier_component.apply_to_job(job)
         return apply_result
 
     # ------------------------------------------------------------------
@@ -512,7 +556,9 @@ class IndeedJobManager(BaseJobManager):
             self.page_num += 1
             logger.info(f"Moved to page {self.page_num + 1}")
             emit_event(
-                "page_changed", f"Moving to page {self.page_num + 1}", page_num=self.page_num
+                "page_changed",
+                f"Moving to page {self.page_num + 1}",
+                page_num=self.page_num,
             )
             return True
         except Exception as e:
