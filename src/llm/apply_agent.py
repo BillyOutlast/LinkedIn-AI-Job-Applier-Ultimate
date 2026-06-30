@@ -198,6 +198,10 @@ class ApplyAgent:
                 tools=tools,
                 use_vision=False,
                 use_thinking=False,
+                # ponytail: cap browser-use churn. Default max_failures=5, step_timeout=180s — both too lax.
+                # Element-index drift loops (e.g. Phenom Feeds) eat tokens without ever raising.
+                max_failures=3,
+                step_timeout=60,
                 save_conversation_path=Path(LOG_DIR).absolute() / "apply_agent_conversation",
                 available_file_paths=available_file_paths,
             )
