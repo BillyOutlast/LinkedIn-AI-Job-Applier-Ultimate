@@ -473,6 +473,7 @@ class LinkedInEasyApplier(BaseEasyApplier):
 
             if modal_content is None:
                 logger.error("Easy Apply modal content not found on the page with any selector")
+                await debug_capture(self.page, "easy_apply_modal_missing")
                 if await self._is_already_applied():
                     raise NoInfoException("Already applied to this job")
                 raise NoInfoException("Easy Apply dialog did not open")
