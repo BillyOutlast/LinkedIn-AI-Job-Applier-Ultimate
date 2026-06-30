@@ -284,6 +284,50 @@ class TestModalDetection:
                     f"aria_idx={aria_idx}, legacy_idx={legacy_idx}, all={attempted}"
                 )
 
+    @pytest.mark.asyncio
+    async def test_fill_up_tries_structural_form_group_selector(self, easy_applier):
+        """After class selectors fail, a structural label+input selector must be tried."""
+        job = Job(
+            job_title="VP Engineering",
+            company_name="Example",
+            url="https://www.linkedin.com/jobs/view/12345",
+        )
+
+        apply_indicator = AsyncMock()
+        form_group = AsyncMock()
+        apply_indicator.locator.return_value.all = AsyncMock(return_value=[])
+        apply_indicator.locator.return_value.first = AsyncMock()
+        apply_indicator.locator.return_value.first.click = AsyncMock()
+        form_group.locator.return_value.all = AsyncMock(return_value=[])
+
+        with (
+            patch(f"{MODULE}.find_element_safely", new_callable=AsyncMock) as mock_find,
+            patch.object(easy_applier, "_click_continue_applying_button", new_callable=AsyncMock),
+            patch.object(
+                easy_applier,
+                "_is_already_applied",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch(f"{MODULE}.async_pause", new_callable=AsyncMock),
+            patch.object(easy_applier.page, "locator") as mock_locator,
+        ):
+            mock_find.side_effect = [None] * 6 + [apply_indicator] + [form_group] * 20
+            mock_locator.return_value.all = AsyncMock(return_value=[])
+            mock_locator.return_value.first = AsyncMock()
+            mock_locator.return_value.first.click = AsyncMock()
+
+            await easy_applier._fill_up(job)
+
+            attempted_xpaths = [
+                c.args[0]
+                for c in mock_locator.call_args_list
+                if c.args and isinstance(c.args[0], str) and c.args[0].startswith("xpath=")
+            ]
+            assert any(
+                "label" in x and "input" in x for x in attempted_xpaths
+            ), f"Expected a structural label+input selector; got: {attempted_xpaths}"
+
 
 class TestNextButtonDetection:
     @pytest.mark.asyncio

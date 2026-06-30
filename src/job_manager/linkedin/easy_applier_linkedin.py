@@ -548,6 +548,19 @@ class LinkedInEasyApplier(BaseEasyApplier):
                     f"Fallback: Found {len(form_elements)} form elements with old selector"
                 )
 
+            if not form_elements:
+                # ponytail: LinkedIn's 2026 rebuild hashed all CSS class names, so
+                # legacy .fb-dash-form-element / .jobs-easy-apply-form-section__group
+                # rarely match. Structural fallback: any element containing a <label>
+                # AND an <input>/<select>/<textarea> is a form group. Works against
+                # the hashed DOM regardless of class names.
+                form_elements = await form_root.locator(
+                    "xpath=.//*[.//label and (.//input or .//select or .//textarea)]"
+                ).all()
+                logger.debug(
+                    f"Structural: Found {len(form_elements)} form elements via label+input selector"
+                )
+
             # Process regular form elements
             for element in form_elements:
                 try:
