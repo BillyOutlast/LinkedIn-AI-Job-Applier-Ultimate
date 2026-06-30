@@ -159,6 +159,71 @@ class TestEasyApplyButtonDetection:
             assert "easy_apply_button_hidden" in hidden_labels
 
 
+class TestModalDetection:
+    @pytest.mark.asyncio
+    async def test_fill_up_attempts_aria_selectors_before_legacy(self, easy_applier):
+        """ARIA selectors must be tried before hashed-class fallbacks."""
+        job = Job(
+            job_title="VP Engineering",
+            company_name="Example",
+            url="https://www.linkedin.com/jobs/view/12345",
+        )
+
+        modal = AsyncMock()
+        modal.locator.return_value.all = AsyncMock(return_value=[])
+        modal.locator.return_value.first = AsyncMock()
+        modal.locator.return_value.first.click = AsyncMock()
+
+        with (
+            patch(f"{MODULE}.find_element_safely", new_callable=AsyncMock) as mock_find,
+            patch.object(easy_applier, "_click_continue_applying_button", new_callable=AsyncMock),
+            patch.object(
+                easy_applier,
+                "_is_already_applied",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch(f"{MODULE}.async_pause", new_callable=AsyncMock),
+        ):
+            # First 3 selectors miss, [role="dialog"] is the 4th and matches.
+            # Subsequent find calls (for form elements / next button) get a usable mock.
+            mock_find.side_effect = [
+                None,
+                None,
+                None,
+                modal,
+                modal,
+                modal,
+                modal,
+                modal,
+            ]
+
+            await easy_applier._fill_up(job)
+
+            attempted = [c.args[1] for c in mock_find.await_args_list]
+            aria_selectors = [
+                s for s in attempted if "[role=" in s or "aria-modal" in s or "aria-labelledby" in s
+            ]
+            assert aria_selectors, f"Expected at least one ARIA-based selector; got: {attempted}"
+            aria_idx = next(
+                (
+                    i
+                    for i, s in enumerate(attempted)
+                    if "[role=" in s or "aria-modal" in s or "aria-labelledby" in s
+                ),
+                None,
+            )
+            legacy_idx = next(
+                (i for i, s in enumerate(attempted) if "jobs-easy-apply-modal" in s),
+                None,
+            )
+            if legacy_idx is not None:
+                assert aria_idx is not None and aria_idx < legacy_idx, (
+                    f"ARIA selectors must come before legacy class; "
+                    f"aria_idx={aria_idx}, legacy_idx={legacy_idx}, all={attempted}"
+                )
+
+
 class TestNextButtonDetection:
     @pytest.mark.asyncio
     async def test_find_next_or_submit_button_returns_matching_button(self, easy_applier):

@@ -467,11 +467,17 @@ class LinkedInEasyApplier(BaseEasyApplier):
             except Exception as e:
                 logger.warning(f"wait_for_selector failed: {e}")
 
-            # Try multiple selectors to find the modal content
+            # ponytail: LinkedIn moved to hashed CSS class names in 2026, so
+            # .jobs-easy-apply-modal__content rarely matches anymore. ARIA
+            # semantics ([role=dialog], [aria-modal=true]) are stable across
+            # builds. ARIA first; legacy classes last as a safety net.
             modal_selectors = [
-                ".jobs-easy-apply-modal__content",  # CSS selector
-                ".artdeco-modal__content",  # Fallback CSS
-                "//*[contains(@class, 'jobs-easy-apply-modal__content')]",  # XPath
+                '[role="dialog"]',  # ARIA dialog role
+                '[aria-modal="true"]',  # Explicit ARIA modal flag
+                '[aria-labelledby*="apply" i]',  # Labelled with apply-related text
+                ".jobs-easy-apply-modal__content",  # Legacy class (rarely matches now)
+                ".artdeco-modal__content",  # Legacy generic modal class
+                "//*[contains(@class, 'jobs-easy-apply-modal__content')]",  # Legacy XPath
             ]
 
             for selector in modal_selectors:
