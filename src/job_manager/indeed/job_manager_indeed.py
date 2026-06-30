@@ -331,7 +331,10 @@ class IndeedJobManager(BaseJobManager):
                             )
                             workday_applier = WorkdayApplier(
                                 page=self.page,
-                                resume_structured=self.resume_structured or {},
+                                resume_structured=load_yaml_file(
+                                    Path(RESUME_DIR) / "structured_resume.yaml"
+                                )
+                                or {},
                                 resume_pdf_path=self.submitted_resume_path
                                 or Path(RESUME_DIR) / "default.pdf",
                                 question_handler=question_handler,
