@@ -65,6 +65,9 @@ class TestEasyApplyButtonDetection:
         button.is_visible = AsyncMock(return_value=True)
         button.is_enabled = AsyncMock(return_value=True)
         button.first = AsyncMock()
+        button.first.bounding_box = AsyncMock(
+            return_value={"x": 100, "y": 200, "width": 120, "height": 32}
+        )
 
         with (
             patch.object(easy_applier, "check_for_premium_redirect", new_callable=AsyncMock),

@@ -251,8 +251,13 @@ class LinkedInEasyApplier(BaseEasyApplier):
                 logger.warning("Easy Apply daily limit detected while searching for button")
                 return None
 
+            # ponytail: LinkedIn changed Easy Apply from <a> to <button aria-label="Easy Apply to this job">.
+            # The legacy <a> selector matched sidebar "· Easy Apply" similar-job links and caused
+            # mis-clicks that navigated to unrelated jobs. ARIA-first, then case-insensitive fallback.
             easy_apply_selectors = [
-                '//a[contains(., "Apply")]',
+                '//button[@aria-label="Easy Apply to this job"]',
+                '//button[contains(translate(@aria-label, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "easy apply")]',
+                '//button[contains(., "Easy Apply")]',
             ]
 
             for selector in easy_apply_selectors:
