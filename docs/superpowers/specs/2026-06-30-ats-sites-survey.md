@@ -125,3 +125,25 @@ None — resolved during brainstorming.
 ## Decomposition note
 
 This is sub-project 1 of N. After discovery completes and produces `summary.md` + per-host JSONL, the user will see the catalog and pick which ATS sites deserve formal automation. Each gets its own brainstorming → spec → plan → implementation cycle. Workday is already done; Phenom / Taleo / SuccessFactors are blacklisted; everything else is a candidate.
+
+## Verification
+
+After Tasks 1-3 land, run the discoverer against the user's real LinkedIn session:
+
+    uv run python -m src.discovery.ats_discoverer
+
+(Note: Tasks 1-3 build the helpers; `run_discovery` itself is the
+operator entry point — confirm its signature in `ats_discoverer.py`
+matches the user's `main.create_and_run_bot` call before running.)
+
+Expected output under `data/output/discovery/sessions/<session_id>/`:
+- `encountered.jsonl` — one line per apply_url hit
+- `captures/*.json` — DOM fingerprints for non-Workday destinations
+- `summary.md` — host-grouped table
+
+Inspect:
+1. `summary.md` — confirm host list is plausible.
+2. JSONL with `outcome: "sent-to-browser-use"` — these are ATSes that need automation.
+3. Captures for each new ATS — verify fingerprints look like real apply forms.
+
+Tighten search filters (e.g., "Retail", "Manufacturing", "Logistics") if all encounters are Easy Apply — External Apply jobs surface more often in those verticals for this user's locale.
