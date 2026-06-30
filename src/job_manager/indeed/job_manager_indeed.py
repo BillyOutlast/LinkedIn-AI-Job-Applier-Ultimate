@@ -61,11 +61,7 @@ class IndeedJobManager(BaseJobManager):
     """Class for searching and sending applications to employers on Indeed"""
 
     def __init__(
-        self,
-        page: Page,
-        linkedin_email: str,
-        resume_anonymizer: Any,
-        search_component: Any,
+        self, page: Page, linkedin_email: str, resume_anonymizer: Any, search_component: Any
     ):
         logger.info("Initializing IndeedJobManager")
         self.page = page
@@ -206,7 +202,8 @@ class IndeedJobManager(BaseJobManager):
 
     async def _scroll_left_panel(self) -> None:
         """Scroll the full page to trigger lazy-loading of job cards"""
-        await self.page.evaluate("""
+        await self.page.evaluate(
+            """
             () => new Promise((resolve) => {
                 const distance = document.body.scrollHeight;
                 const durationMs = 2000;
@@ -219,7 +216,8 @@ class IndeedJobManager(BaseJobManager):
                 }
                 requestAnimationFrame(step);
             })
-            """)
+            """
+        )
         await async_pause(1, 2)
         await self.page.evaluate("() => window.scrollTo(0, 0)")
 
@@ -269,10 +267,7 @@ class IndeedJobManager(BaseJobManager):
             else:
                 interest_result = self.llm_answerer_component.job_is_interesting(job.model_dump())
                 if interest_result is None:
-                    apply_result = (
-                        "Error",
-                        "Error while determining if job is interesting",
-                    )
+                    apply_result = ("Error", "Error while determining if job is interesting")
                     await self._handle_apply_result(apply_result, job, evaluation=evaluation)
                     return "Error"
                 job_is_interesting, score, reasoning = interest_result
@@ -377,10 +372,7 @@ class IndeedJobManager(BaseJobManager):
             cover_letter_dir=Path(COVER_LETTER_DIR),
             test_mode=TEST_MODE,
         )
-        (
-            apply_result,
-            self.submitted_resume_path,
-        ) = await easy_applier_component.apply_to_job(job)
+        apply_result, self.submitted_resume_path = await easy_applier_component.apply_to_job(job)
         return apply_result
 
     # ------------------------------------------------------------------
@@ -556,9 +548,7 @@ class IndeedJobManager(BaseJobManager):
             self.page_num += 1
             logger.info(f"Moved to page {self.page_num + 1}")
             emit_event(
-                "page_changed",
-                f"Moving to page {self.page_num + 1}",
-                page_num=self.page_num,
+                "page_changed", f"Moving to page {self.page_num + 1}", page_num=self.page_num
             )
             return True
         except Exception as e:
