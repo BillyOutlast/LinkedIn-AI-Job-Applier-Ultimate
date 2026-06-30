@@ -104,6 +104,56 @@ def capture_fingerprint(page: Any, url: str) -> dict:
         return {"fingerprint_status": "capture-failed", "error": str(e)}
 
 
+def _capture_to_disk(url: str, page: Any, captures_dir: Path) -> Path:
+    """Capture fingerprint to disk; return path. Best-effort."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    host = _extract_host(url) or "unknown"
+    safe_host = host.replace("/", "_").replace(":", "_")
+    capture_path = captures_dir / f"{safe_host}_{timestamp}.json"
+    try:
+        fp = capture_fingerprint(page, url)
+        capture_path.write_text(json.dumps(fp, indent=2))
+    except Exception as e:
+        capture_path.write_text(
+            json.dumps({"fingerprint_status": "capture-failed", "error": str(e)})
+        )
+    return capture_path
+
+
+def record_encounter_with_page(page: Any, url: str, outcome: str, signature: str = "") -> None:
+    """Same as record_encounter, plus a DOM fingerprint capture.
+
+    Used by dispatchers that have a Playwright page in scope. The fingerprint
+    is written to captures/<host>_<ts>.json and a second JSONL line is
+    appended with `fingerprint_path` so the summarize() can reference it.
+    """
+    if _DISCOVERY_LOG_PATH is None:
+        return
+    record_encounter(url, outcome, signature)
+    try:
+        captures_dir = _DISCOVERY_LOG_PATH.parent / "captures"
+        captures_dir.mkdir(exist_ok=True)
+        capture_path = _capture_to_disk(url, page, captures_dir)
+        with open(_DISCOVERY_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "host": _extract_host(url),
+                        "url": url,
+                        "outcome": outcome,
+                        "signature": signature or _match_signature(url),
+                        "fingerprint_path": str(
+                            capture_path.relative_to(_DISCOVERY_LOG_PATH.parent.parent)
+                        ),
+                    }
+                )
+                + "\n"
+            )
+    except Exception as e:
+        logger.debug(f"record_encounter_with_page capture failed (non-fatal): {e}")
+
+
 def summarize(jsonl_path: Path) -> str:
     """Host-grouped markdown summary. Empty log returns the '0 sites encountered' stub."""
     by_host: dict[str, list[dict]] = {}

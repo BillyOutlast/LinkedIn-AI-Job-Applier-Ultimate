@@ -116,3 +116,43 @@ def test_capture_fingerprint_returns_dict_or_capture_failed():
     fp = capture_fingerprint(MagicMock(), "https://example.invalid/apply")
     assert isinstance(fp, dict)
     assert "title" in fp or "fingerprint_status" in fp
+
+
+def test_record_encounter_with_page_writes_capture(tmp_path, monkeypatch):
+    import src.discovery.ats_discoverer as mod
+
+    log = tmp_path / "encountered.jsonl"
+    log.touch()
+    captures_dir = tmp_path / "captures"
+    captures_dir.mkdir()
+    monkeypatch.setattr(mod, "_DISCOVERY_LOG_PATH", log)
+
+    monkeypatch.setattr(
+        mod,
+        "capture_fingerprint",
+        lambda page, url: {"title": "Apply Now", "headings": ["Apply Now"]},
+    )
+    monkeypatch.setattr(
+        mod,
+        "_capture_to_disk",
+        lambda url, page, captures_dir: captures_dir / "fake.json",
+    )
+
+    # Stub _capture_to_disk
+    from pathlib import Path
+
+    def fake_capture_to_disk(url, page, cdir):
+        p = cdir / f"fake.json"
+        p.write_text('{"title": "Apply Now"}')
+        return p
+
+    monkeypatch.setattr(mod, "_capture_to_disk", fake_capture_to_disk)
+
+    mod.record_encounter_with_page(
+        MagicMock(), "https://boards.greenhouse.io/apply", "sent-to-browser-use", ""
+    )
+    with open(log) as f:
+        lines = [l for l in f.readlines() if l.strip()]
+    assert len(lines) >= 1
+    last = json.loads(lines[-1])
+    assert "fingerprint_path" in last

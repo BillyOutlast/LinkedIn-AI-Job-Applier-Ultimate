@@ -430,13 +430,15 @@ class LinkedInJobManager(BaseJobManager):
                             # ponytail: skip external ATSes browser-use chokes on; agent loops on stale element indices.
                             if any(host in apply_url for host in EXTERNAL_APPLY_SKIP_ATSES):
                                 logger.info(f"Skipping unsupported external ATS: {apply_url}")
-                                self._record_encounter(apply_url, "skipped-known-ats")
+                                self._record_encounter_with_capture(apply_url, "skipped-known-ats")
                                 apply_result = (
                                     "Skip",
                                     f"Unsupported external ATS: {apply_url}",
                                 )
                             else:
-                                self._record_encounter(apply_url, "sent-to-browser-use")
+                                self._record_encounter_with_capture(
+                                    apply_url, "sent-to-browser-use"
+                                )
                                 apply_result = await self.llm_agent_component.apply_to_job(
                                     apply_url
                                 )
@@ -947,6 +949,17 @@ class LinkedInJobManager(BaseJobManager):
         from src.discovery.ats_discoverer import record_encounter as _re
 
         _re(url, outcome)
+
+    def _record_encounter_with_capture(self, url: str, outcome: str) -> None:
+        """Same as _record_encounter but also captures a DOM fingerprint for non-Workday outcomes."""
+        from src.discovery.ats_discoverer import record_encounter_with_page
+
+        if outcome in {"sent-to-browser-use", "skipped-known-ats", "error"}:
+            record_encounter_with_page(self.page, url, outcome)
+        else:
+            from src.discovery.ats_discoverer import record_encounter
+
+            record_encounter(url, outcome)
 
     async def _go_to_next_page(self) -> bool:
         """Go to the next page using framework-agnostic methods (async)"""

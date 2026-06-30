@@ -343,7 +343,7 @@ class IndeedJobManager(BaseJobManager):
                             )
                             apply_result = await workday_applier.apply_to_job(apply_url)
                         else:
-                            self._record_encounter(apply_url, "sent-to-browser-use")
+                            self._record_encounter_with_capture(apply_url, "sent-to-browser-use")
                             apply_result = await self.llm_agent_component.apply_to_job(apply_url)
                     else:
                         apply_result = (
@@ -542,6 +542,17 @@ class IndeedJobManager(BaseJobManager):
         from src.discovery.ats_discoverer import record_encounter as _re
 
         _re(url, outcome)
+
+    def _record_encounter_with_capture(self, url: str, outcome: str) -> None:
+        """Same as _record_encounter but also captures a DOM fingerprint for non-Workday outcomes."""
+        from src.discovery.ats_discoverer import record_encounter_with_page
+
+        if outcome in {"sent-to-browser-use", "skipped-known-ats", "error"}:
+            record_encounter_with_page(self.page, url, outcome)
+        else:
+            from src.discovery.ats_discoverer import record_encounter
+
+            record_encounter(url, outcome)
 
     async def _dismiss_overlays(self) -> None:
         """Dismiss Indeed overlay portals that intercept clicks"""
