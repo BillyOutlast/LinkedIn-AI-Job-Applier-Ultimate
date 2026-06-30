@@ -396,6 +396,7 @@ class LinkedInJobManager(BaseJobManager):
                         if TEST_MODE:
                             apply_result = "Skip", "Test mode"
                         elif "myworkdayjobs.com" in apply_url:
+                            self._record_encounter(apply_url, "routed-to-workday")
                             from src.job_manager.workday import WorkdayApplier
                             from src.job_manager.workday.workday_authenticator import (
                                 WorkdayAuthenticator,
@@ -429,11 +430,13 @@ class LinkedInJobManager(BaseJobManager):
                             # ponytail: skip external ATSes browser-use chokes on; agent loops on stale element indices.
                             if any(host in apply_url for host in EXTERNAL_APPLY_SKIP_ATSES):
                                 logger.info(f"Skipping unsupported external ATS: {apply_url}")
+                                self._record_encounter(apply_url, "skipped-known-ats")
                                 apply_result = (
                                     "Skip",
                                     f"Unsupported external ATS: {apply_url}",
                                 )
                             else:
+                                self._record_encounter(apply_url, "sent-to-browser-use")
                                 apply_result = await self.llm_agent_component.apply_to_job(
                                     apply_url
                                 )
@@ -938,6 +941,12 @@ class LinkedInJobManager(BaseJobManager):
                 logger.debug(f"Failed to get the link of the apply button: {e}")
         logger.warning("No apply button found")
         return ""
+
+    def _record_encounter(self, url: str, outcome: str) -> None:
+        """Lazy import: no-op when discovery mode is off."""
+        from src.discovery.ats_discoverer import record_encounter as _re
+
+        _re(url, outcome)
 
     async def _go_to_next_page(self) -> bool:
         """Go to the next page using framework-agnostic methods (async)"""

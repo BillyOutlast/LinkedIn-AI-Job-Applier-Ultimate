@@ -312,6 +312,7 @@ class IndeedJobManager(BaseJobManager):
                     apply_url = await self._get_button_link(new_page)
                     if apply_url:
                         if "myworkdayjobs.com" in apply_url:
+                            self._record_encounter(apply_url, "routed-to-workday")
                             from src.job_manager.workday import WorkdayApplier
                             from src.job_manager.workday.workday_authenticator import (
                                 WorkdayAuthenticator,
@@ -342,6 +343,7 @@ class IndeedJobManager(BaseJobManager):
                             )
                             apply_result = await workday_applier.apply_to_job(apply_url)
                         else:
+                            self._record_encounter(apply_url, "sent-to-browser-use")
                             apply_result = await self.llm_agent_component.apply_to_job(apply_url)
                     else:
                         apply_result = (
@@ -534,6 +536,12 @@ class IndeedJobManager(BaseJobManager):
                 continue
         logger.warning("Could not find external apply button on Indeed job page")
         return ""
+
+    def _record_encounter(self, url: str, outcome: str) -> None:
+        """Lazy import: no-op when discovery mode is off."""
+        from src.discovery.ats_discoverer import record_encounter as _re
+
+        _re(url, outcome)
 
     async def _dismiss_overlays(self) -> None:
         """Dismiss Indeed overlay portals that intercept clicks"""
