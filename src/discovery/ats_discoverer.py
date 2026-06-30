@@ -280,3 +280,33 @@ if __name__ == "__main__":
     import asyncio
 
     raise SystemExit(asyncio.run(run_discovery()))
+
+
+def _auto_init_discovery() -> None:
+    """If DISCOVERY flag is True, set up _DISCOVERY_LOG_PATH on import.
+
+    Defensive: any failure (config missing, disk full, permission denied)
+    leaves the module in its no-op state so the apply path is unaffected.
+    """
+    global _DISCOVERY_LOG_PATH
+    if _DISCOVERY_LOG_PATH is not None:
+        return
+    try:
+        from config.app_config import DISCOVERY
+    except Exception:
+        return
+    if not DISCOVERY:
+        return
+    try:
+        session_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        session_dir = Path("data/output/discovery/sessions") / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / "captures").mkdir(exist_ok=True)
+        log_path = session_dir / "encountered.jsonl"
+        log_path.touch()
+        _DISCOVERY_LOG_PATH = log_path
+    except Exception as e:
+        logger.debug(f"Auto-init discovery failed (non-fatal): {e}")
+
+
+_auto_init_discovery()

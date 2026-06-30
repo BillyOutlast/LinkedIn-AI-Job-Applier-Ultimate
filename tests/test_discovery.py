@@ -154,3 +154,21 @@ def test_record_encounter_with_page_writes_capture(tmp_path, monkeypatch):
     second = json.loads(lines[1])
     assert "fingerprint_path" not in first
     assert "fingerprint_path" in second
+
+
+def test_discovery_auto_init_when_flag_enabled(tmp_path, monkeypatch):
+    """When DISCOVERY=True and log path unset, _auto_init sets the path."""
+    import src.discovery.ats_discoverer as mod
+    monkeypatch.setattr(mod, "_DISCOVERY_LOG_PATH", None)
+    monkeypatch.setattr("config.app_config.DISCOVERY", True, raising=False)
+    mod._auto_init_discovery()
+    assert mod._DISCOVERY_LOG_PATH is not None
+    assert mod._DISCOVERY_LOG_PATH.name == "encountered.jsonl"
+
+
+def test_discovery_no_auto_init_when_flag_disabled(tmp_path, monkeypatch):
+    import src.discovery.ats_discoverer as mod
+    monkeypatch.setattr(mod, "_DISCOVERY_LOG_PATH", None)
+    monkeypatch.setattr("config.app_config.DISCOVERY", False, raising=False)
+    mod._auto_init_discovery()
+    assert mod._DISCOVERY_LOG_PATH is None

@@ -56,6 +56,13 @@ WARNING: applying to the jobs with 3rd party applications is not guaranteed to b
 """
 EASY_APPLY_ONLY_MODE = False
 
+# ponytail: ATS discovery. Set to True to log every apply_url encounter
+# (host + URL + outcome) to data/output/discovery/sessions/<id>/encountered.jsonl
+# and capture DOM fingerprints for non-Workday destinations. Adds
+# capture_fingerprint() page loads in headless Chromium per non-Workday
+# apply URL — expect +5-15s per such job. Set False for normal runs.
+DISCOVERY = False
+
 """
 If True - use the LinkedIn Premium Easy Apply flow (easy_applier_linkedin_premium.py).
 If False - use the standard Easy Apply flow (easy_applier_linkedin.py).
