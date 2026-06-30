@@ -37,15 +37,29 @@ class WorkdayAuthenticator:
         env_pw = os.getenv("WORKDAY_DEFAULT_PASSWORD", "").strip()
         return env_pw or secrets.token_urlsafe(24)
 
-    async def ensure_session(self, tenant: str, email: str) -> bool:
-        """Return True if a usable session exists or was created for tenant."""
+    async def ensure_session(self, tenant: str, email: str, apply_url: str = "") -> bool:
+        """Return True if a usable session exists or was created for tenant.
+
+        Args:
+            tenant: Workday tenant ID (from URL path, e.g., "UhaulJobs").
+            email: Account email.
+            apply_url: The apply URL the user reached. Used to derive the
+                correct account-creation URL (real Workday URLs vary by
+                tenant subdomain and wd-region, e.g. wd1 vs wd5).
+        """
         path = self._session_path(tenant)
         if path.exists():
             logger.info(f"Workday session exists for tenant={tenant}")
             return True
 
+        from src.job_manager.workday.workday_applier import WorkdayApplier
+
         logger.info(f"Creating Workday account for tenant={tenant}")
-        url = f"https://{tenant}.myworkdayjobs.com/en-US/{tenant}/account/create"
+        url = (
+            WorkdayApplier._account_creation_url(apply_url)
+            if apply_url
+            else f"https://{tenant}.myworkdayjobs.com/en-US/{tenant}/account/create"
+        )
         try:
             await self.page.goto(url, wait_until="domcontentloaded")
             if not await safe_fill(self.page, ACCOUNT_CREATE_EMAIL_INPUT, email):

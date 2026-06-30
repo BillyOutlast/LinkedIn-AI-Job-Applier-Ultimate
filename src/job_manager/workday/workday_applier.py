@@ -73,8 +73,37 @@ class WorkdayApplier:
 
     @staticmethod
     def _tenant_from_url(url: str) -> str:
-        host = urlparse(url).hostname or ""
-        return host.split(".")[0]
+        """Extract Workday tenant from URL path.
+
+        Real Workday URLs look like:
+          https://uhaul.wd1.myworkdayjobs.com/en-US/UhaulJobs/job/...
+          https://example.wd5.myworkdayjobs.com/example/job/...
+
+        Tenant is the first path segment after any locale prefix
+        ("en-US", "en-us", etc.) — NOT the subdomain ("uhaul", "example").
+        """
+        parsed = urlparse(url)
+        parts = [p for p in parsed.path.split("/") if p]
+        for p in parts:
+            # Skip locale segments like "en-US" or "en_CA"
+            if "-" in p or "_" in p:
+                continue
+            if len(p) > 1:
+                return p
+        return parsed.hostname.split(".")[0] if parsed.hostname else "unknown"
+
+    @staticmethod
+    def _account_creation_url(apply_url: str) -> str:
+        """Derive the account-creation URL from the apply URL.
+
+        Apply URL:  /en-US/UhaulJobs/job/.../apply
+        Account:    /en-US/UhaulJobs/account/create
+        """
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(apply_url)
+        path = parsed.path.split("/job/")[0]
+        return urlunparse((parsed.scheme, parsed.netloc, f"{path}/account/create", "", "", ""))
 
     def _account_email(self, tenant: str) -> str:
         import os
@@ -84,16 +113,14 @@ class WorkdayApplier:
             return per_tenant
         return os.getenv("linkedin_email") or os.getenv("indeed_email") or ""
 
-    async def apply_to_job(
-        self, url: str, job: Any = None
-    ) -> tuple[tuple[str, str], Optional[str]]:
+    async def apply_to_job(self, url: str, job: Any = None) -> tuple[str, str]:
         tenant = self._tenant_from_url(url)
         emit_event("workday_phase", f"Starting Workday apply tenant={tenant}", tenant=tenant)
 
         try:
             await self._navigate_to_apply(url)
-            if not await self._fill_account_if_needed(tenant):
-                return (("Error", f"Account creation failed for tenant={tenant}"), None)
+            if not await self._fill_account_if_needed(url, tenant):
+                return ("Error", f"Account creation failed for tenant={tenant}")
             for phase_name, phase_fn in (
                 ("my_experience", self._fill_my_experience),
                 ("voluntary_disclosures", self._fill_voluntary_disclosures),
@@ -101,22 +128,24 @@ class WorkdayApplier:
             ):
                 ok = await phase_fn()
                 if not ok:
-                    return (("Error", f"Phase failed: {phase_name}"), None)
+                    return ("Error", f"Phase failed: {phase_name}")
             result, reason = await self._review_and_submit(tenant)
             emit_event("workday_submitted", f"Submitted tenant={tenant}", tenant=tenant)
-            return ((result, reason), None)
+            return (result, reason)
         except Exception as e:
             logger.error(f"Workday apply crashed tenant={tenant}: {e}", exc_info=True)
             await debug_capture(self.page, f"workday_{tenant}_crash")
-            return (("Error", str(e)), None)
+            return ("Error", str(e))
 
     # --- Phase methods (implemented in Tasks 7-9) ----------------------------
     async def _navigate_to_apply(self, url: str) -> None:
         await self.page.goto(url, wait_until="domcontentloaded")
         await find_element_safely(self.page, APPLY_FLOW_CONTAINER, "css")
 
-    async def _fill_account_if_needed(self, tenant: str) -> bool:
-        return await self.authenticator.ensure_session(tenant, email=self._account_email(tenant))
+    async def _fill_account_if_needed(self, apply_url: str, tenant: str) -> bool:
+        return await self.authenticator.ensure_session(
+            tenant, apply_url=apply_url, email=self._account_email(tenant)
+        )
 
     async def _fill_my_experience(self) -> bool:
         if not await self._upload_resume():
