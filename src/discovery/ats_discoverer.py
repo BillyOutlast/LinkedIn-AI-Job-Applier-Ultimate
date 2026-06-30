@@ -70,6 +70,11 @@ def record_encounter(url: str, outcome: str, signature: str = "") -> None:
 
 
 async def _capture_async(page: Any, url: str) -> dict:
+    hostnames: set[str] = set()
+    try:
+        page.on("request", lambda req: hostnames.add(urlparse(req.url).netloc.lower()))
+    except Exception:
+        pass
     await page.goto(url, timeout=15000)
     title = await page.title()
     headings = await page.evaluate(
@@ -92,17 +97,36 @@ async def _capture_async(page: Any, url: str) -> dict:
         "button_labels": buttons or [],
         "ats_marker_classes": classes or [],
         "iframe_count": iframes,
+        "network_hostnames": hostnames,
     }
 
 
 def capture_fingerprint(page: Any, url: str) -> dict:
-    """Best-effort DOM fingerprint. On failure returns {fingerprint_status: capture-failed, error}."""
-    try:
+    """Best-effort DOM fingerprint. On failure returns {fingerprint_status: capture-failed, error}.
+
+    Runs `_capture_async` on a dedicated worker thread so this function
+    is safe to call from inside an existing event loop (e.g. test code
+    under `asyncio.run`) and from synchronous callers alike.
+
+    Note: `network_hostnames` is returned as the live `set` (not a
+    sorted snapshot) so callers observing the dict after this function
+    returns can still see listener additions. JSON serialization in
+    `_capture_to_disk` converts the set to a sorted list for stable
+    on-disk output. Direct callers reading the dict in memory see a
+    `set[str]`; sort at consumption time if needed.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _runner() -> dict:
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(_capture_async(page, url))
         finally:
             loop.close()
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            return ex.submit(_runner).result()
     except Exception as e:
         return {"fingerprint_status": "capture-failed", "error": str(e)}
 
@@ -115,6 +139,11 @@ def _capture_to_disk(url: str, page: Any, captures_dir: Path) -> Path:
     capture_path = captures_dir / f"{safe_host}_{timestamp}.json"
     try:
         fp = capture_fingerprint(page, url)
+        # network_hostnames is held as a live set in memory; serialize as a
+        # sorted list so the on-disk JSON is stable and human-readable.
+        nh = fp.get("network_hostnames")
+        if isinstance(nh, set):
+            fp["network_hostnames"] = sorted(nh)
         capture_path.write_text(json.dumps(fp, indent=2))
     except Exception as e:
         capture_path.write_text(

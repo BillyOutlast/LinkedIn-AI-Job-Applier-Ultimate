@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -159,6 +159,7 @@ def test_record_encounter_with_page_writes_capture(tmp_path, monkeypatch):
 def test_discovery_auto_init_when_flag_enabled(tmp_path, monkeypatch):
     """When DISCOVERY=True and log path unset, _auto_init sets the path."""
     import src.discovery.ats_discoverer as mod
+
     monkeypatch.setattr(mod, "_DISCOVERY_LOG_PATH", None)
     monkeypatch.setattr("config.app_config.DISCOVERY", True, raising=False)
     mod._auto_init_discovery()
@@ -168,7 +169,47 @@ def test_discovery_auto_init_when_flag_enabled(tmp_path, monkeypatch):
 
 def test_discovery_no_auto_init_when_flag_disabled(tmp_path, monkeypatch):
     import src.discovery.ats_discoverer as mod
+
     monkeypatch.setattr(mod, "_DISCOVERY_LOG_PATH", None)
     monkeypatch.setattr("config.app_config.DISCOVERY", False, raising=False)
     mod._auto_init_discovery()
     assert mod._DISCOVERY_LOG_PATH is None
+
+
+def test_capture_fingerprint_includes_network_hostnames():
+    """Mocked page emits request events; fingerprint dict includes network_hostnames."""
+    page = MagicMock()
+    listeners = []
+
+    def fake_on(event, handler):
+        if event == "request":
+            listeners.append(handler)
+
+    page.on = fake_on
+    page.goto = AsyncMock()
+    page.title = AsyncMock(return_value="Apply Now")
+    page.evaluate = AsyncMock(
+        side_effect=[
+            [],  # headings
+            [],  # inputs
+            [],  # buttons
+            [],  # classes
+            0,  # iframe_count
+        ]
+    )
+
+    import asyncio
+
+    async def run_capture():
+        captured = capture_fingerprint(page, "https://example.com/apply")
+        for url in ["https://api.greenhouse.io/v1/x", "https://boards.greenhouse.io/y"]:
+            for h in listeners:
+                req = MagicMock()
+                req.url = url
+                h(req)
+        return captured
+
+    fp = asyncio.run(run_capture())
+    assert "network_hostnames" in fp
+    assert "api.greenhouse.io" in fp["network_hostnames"]
+    assert "boards.greenhouse.io" in fp["network_hostnames"]
