@@ -24,6 +24,7 @@ from config.constants import CUSTOM_COST_PER_TOKEN, LOG_DIR, RESUME_DIR, cost_pe
 from config.logger_config import logger
 from src.dashboard.runtime import emit_event
 from src.job_manager.greenhouse.greenhouse_applier import GreenhouseApplier
+from src.job_manager.taleo.taleo_applier import TaleoApplier
 from src.llm.ats_recognizer import recognize
 from src.pydantic_models.log_models import LLMCall
 from src.utils.utils import append_yaml_file, get_ready_made_resume
@@ -355,6 +356,34 @@ class ApplyAgent:
                 resume_structured=resume_structured,
                 resume_pdf_path=resume_pdf_path,
                 question_handler=question_handler,
+            )
+        if handler_factory is not None and handler_factory() is TaleoApplier:
+            from pathlib import Path
+
+            from config.constants import OUTPUT_DIR_TALEO
+            from src.job_manager.taleo.taleo_applier import TaleoApplier
+            from src.job_manager.taleo.taleo_authenticator import TaleoAuthenticator
+            from src.job_manager.taleo.taleo_questions import TaleoQuestionHandler
+
+            secrets = getattr(agent_self, "secrets", None) or {}
+            authenticator = TaleoAuthenticator(
+                username=getattr(secrets, "taleo_username", None),
+                password=getattr(secrets, "taleo_password", None),
+            )
+            question_handler = TaleoQuestionHandler(
+                cache_path=Path(OUTPUT_DIR_TALEO) / "answers.yaml",
+                llm_answerer=getattr(agent_self, "llm_answerer", None),
+            )
+            resume_structured = getattr(agent_self, "resume_structured", None) or {}
+            resume_pdf_path = (
+                getattr(agent_self, "resume_pdf_path", None) or Path(RESUME_DIR) / "default.pdf"
+            )
+            return TaleoApplier(
+                page=agent_self.page,
+                resume_structured=resume_structured,
+                resume_pdf_path=resume_pdf_path,
+                question_handler=question_handler,
+                authenticator=authenticator,
             )
         raise ValueError(f"Unknown handler factory: {handler_factory}")
 

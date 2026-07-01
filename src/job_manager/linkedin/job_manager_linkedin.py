@@ -64,7 +64,6 @@ logger.info(f"Maximum allowed number of applications: {MAX_APPLIES_NUM}")
 # (myworkdayjobs URLs are routed to WorkdayApplier above this check, so they never reach here.)
 EXTERNAL_APPLY_SKIP_ATSES: tuple[str, ...] = (
     "phenom",
-    "taleo",
     "successfactors",
 )
 
