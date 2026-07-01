@@ -14,10 +14,16 @@ from browser_use import (
 )
 from browser_use.tools.views import UploadFileAction
 
-from config.app_config import APPLY_AGENT_MODEL, HEADLESS_MODE, LLM_MODEL_TYPE
+from config.app_config import (
+    APPLY_AGENT_MODEL,
+    APPLY_AGENT_RECOGNIZE,
+    HEADLESS_MODE,
+    LLM_MODEL_TYPE,
+)
 from config.constants import CUSTOM_COST_PER_TOKEN, LOG_DIR, RESUME_DIR, cost_per_token
 from config.logger_config import logger
 from src.dashboard.runtime import emit_event
+from src.llm.ats_recognizer import recognize
 from src.pydantic_models.log_models import LLMCall
 from src.utils.utils import append_yaml_file, get_ready_made_resume
 
@@ -260,6 +266,18 @@ class ApplyAgent:
 
     async def apply_to_job(self, job_url: str) -> tuple[str, str]:
         """Apply to job, handling event loop properly"""
+        # Recognizer-routed ATSes get a dedicated handler before the LLM flow.
+        if APPLY_AGENT_RECOGNIZE:
+            match = recognize(job_url)
+            if match is not None:
+                try:
+                    handler = self._build_handler_with_state(match.handler_factory, self, job_url)
+                    result = await handler.apply_to_job(job_url)
+                    if result and result[0] == "Success":
+                        return result
+                    logger.info(f"Handler {match.name} returned {result}, falling through to LLM")
+                except Exception as e:
+                    logger.warning(f"Handler {match.name} raised; falling through to LLM: {e}")
         # Directly await the apply method since we're already in an async context
         try:
             await self.apply(job_url)
@@ -273,6 +291,48 @@ class ApplyAgent:
                 error=str(e),
             )
             return ("Error", str(e))
+
+    @staticmethod
+    def _build_handler_with_state(handler_factory, agent_self, link):
+        """Build a handler instance with deps wired from ApplyAgent state.
+
+        Only WorkdayApplier is currently supported. New handlers extend the if/elif
+        below — that's the entry-point contract for adding per-ATS sub-projects.
+        """
+        from pathlib import Path
+
+        from config.constants import OUTPUT_DIR_WORKDAY, RESUME_DIR, WORKDAY_SESSION_DIR
+        from src.job_manager.workday import workday_applier as _wd_applier_mod
+        from src.job_manager.workday.workday_applier import WorkdayApplier
+        from src.job_manager.workday.workday_authenticator import WorkdayAuthenticator
+        from src.job_manager.workday.workday_questions import WorkdayQuestionHandler
+
+        # Resolve WorkdayApplier via the module attribute so tests can
+        # monkeypatch the workday_applier module and the dispatch still
+        # routes to the replacement class.
+        WorkdayApplier = _wd_applier_mod.WorkdayApplier
+        if handler_factory is not None and handler_factory() is WorkdayApplier:
+            authenticator = WorkdayAuthenticator(
+                page=agent_self.page,
+                session_dir=Path(WORKDAY_SESSION_DIR),
+                storage_writer=None,
+            )
+            question_handler = WorkdayQuestionHandler(
+                cache_path=Path(OUTPUT_DIR_WORKDAY) / "answers.yaml",
+                llm_answerer=getattr(agent_self, "llm_answerer", None),
+            )
+            resume_structured = getattr(agent_self, "resume_structured", None) or {}
+            resume_pdf_path = (
+                getattr(agent_self, "resume_pdf_path", None) or Path(RESUME_DIR) / "default.pdf"
+            )
+            return WorkdayApplier(
+                page=agent_self.page,
+                resume_structured=resume_structured,
+                resume_pdf_path=resume_pdf_path,
+                question_handler=question_handler,
+                authenticator=authenticator,
+            )
+        raise ValueError(f"Unknown handler factory: {handler_factory}")
 
 
 if __name__ == "__main__":
