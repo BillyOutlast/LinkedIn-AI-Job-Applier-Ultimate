@@ -178,6 +178,10 @@ APPLY_AGENT_MODEL = "MiniMax-M3"
 # APPLY_AGENT_MODEL = "google/gemini-3-flash-preview"
 # APPLY_AGENT_MODEL = "gpt-5-mini"
 
+# ponytail: route recognized ATSes (Workday, etc.) to dedicated handlers before
+# the LLM apply path. Disable if a handler misbehaves or during LLM debugging.
+APPLY_AGENT_RECOGNIZE = True
+
 """
 Easy Apply model temperature
 the higher it is, the more creative the model, but hallucinations may occur
