@@ -74,3 +74,39 @@ async def test_apply_agent_falls_through_to_llm_when_disabled(agent, monkeypatch
     fake_agent.run.assert_awaited_once()
     # apply_to_job wraps the LLM success in ("Success", "").
     assert result[0] == "Success"
+
+
+@pytest.mark.asyncio
+async def test_apply_agent_falls_through_to_llm_when_handler_raises(agent, monkeypatch):
+    """Handler exception → LLM flow runs (spec: fall through on handler raise)."""
+    from src.job_manager.workday import workday_applier as wd_mod
+    from src.llm import apply_agent as mod
+
+    monkeypatch.setattr(mod, "APPLY_AGENT_RECOGNIZE", True, raising=False)
+
+    # Wire a fake Workday handler that raises when invoked.
+    raising_handler = AsyncMock()
+    raising_handler.apply_to_job = AsyncMock(side_effect=RuntimeError("handler boom"))
+    agent.page = MagicMock()
+
+    class _FakeWorkday:
+        def __new__(cls, *args, **kwargs):
+            return raising_handler
+
+    monkeypatch.setattr(wd_mod, "WorkdayApplier", _FakeWorkday)
+    fake_match = MagicMock(name="workday", handler_factory=lambda: wd_mod.WorkdayApplier)
+    monkeypatch.setattr(mod, "recognize", lambda url: fake_match)
+
+    # LLM should run with its normal shape ("Success", "") wrapping a successful run.
+    fake_agent = MagicMock(run=AsyncMock(return_value=None))
+    fake_agent_cls = MagicMock(return_value=fake_agent)
+    monkeypatch.setattr(mod, "Agent", fake_agent_cls)
+
+    result = await agent.apply_to_job("https://uhaul.wd1.myworkdayjobs.com/job/1")
+
+    # Handler was invoked (and raised); LLM Agent then constructed and run.
+    raising_handler.apply_to_job.assert_awaited_once()
+    fake_agent_cls.assert_called_once()
+    fake_agent.run.assert_awaited_once()
+    # Result shape is the LLM-flow shape ("Success", "") — not the handler's exception.
+    assert result == ("Success", "")

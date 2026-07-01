@@ -41,20 +41,14 @@ _HOSTNAME_PATTERNS = [
     # (re.compile(r"(^|\.)boards?\.greenhouse\.io$", re.I), "greenhouse"),
 ]
 
-_MARKER_PATTERNS = [
-    (re.compile(r"jobs?[-_]?easy[-_]?apply", re.I), "workday"),
-    # Future markers for other ATSes added here.
-]
-
 
 def _fingerprint(url: str) -> dict:
-    """Lightweight fingerprint: URL hostname + URL tokens. <2s, no DOM walk."""
+    """Lightweight fingerprint: URL hostname. <2s, no DOM walk."""
     host = urlparse(url).netloc.lower()
     return {
         "url": url,
         "host": host,
         "hostnames": {host},
-        "url_tokens": set(re.findall(r"[a-z0-9-]+", url.lower())),
     }
 
 
@@ -62,15 +56,8 @@ def recognize(url: str) -> Optional[ATSMatch]:
     """Best-effort ATS recognition. Returns None on no match or any failure."""
     try:
         fp = _fingerprint(url)
-        # 1. Hostname match (highest confidence)
         for pattern, name in _HOSTNAME_PATTERNS:
             if pattern.search(fp["host"]):
-                if name in _KNOWN_ATS:
-                    return _KNOWN_ATS[name]
-        # 2. URL-token match (catches subdomains / paths)
-        tokens_joined = " ".join(fp["url_tokens"])
-        for pattern, name in _MARKER_PATTERNS:
-            if pattern.search(tokens_joined):
                 if name in _KNOWN_ATS:
                     return _KNOWN_ATS[name]
         return None
