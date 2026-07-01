@@ -23,6 +23,11 @@ _KNOWN_ATS: dict[str, ATSMatch] = {
         confidence=1.0,
         handler_factory=lambda: _workday_handler_class,
     ),
+    "greenhouse": ATSMatch(
+        name="greenhouse",
+        confidence=1.0,
+        handler_factory=lambda: _greenhouse_handler_class,
+    ),
     # Future per-ATS plans add entries here. Each new entry is one
     # line in this table — the rest of the dispatcher routes for free.
 }
@@ -35,10 +40,16 @@ def _workday_handler_class():
     return WorkdayApplier
 
 
+def _greenhouse_handler_class():
+    from src.job_manager.greenhouse.greenhouse_applier import GreenhouseApplier
+
+    return GreenhouseApplier
+
+
 _HOSTNAME_PATTERNS = [
     (re.compile(r"\.myworkdayjobs\.com$", re.I), "workday"),
-    # Future entries — e.g.:
-    # (re.compile(r"(^|\.)boards?\.greenhouse\.io$", re.I), "greenhouse"),
+    (re.compile(r"(^|\.)boards?\.greenhouse\.io$", re.I), "greenhouse"),
+    (re.compile(r"(^|\.)job-boards\.greenhouse\.io$", re.I), "greenhouse"),
 ]
 
 

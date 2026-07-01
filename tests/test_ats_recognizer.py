@@ -9,7 +9,7 @@ def test_recognize_workday_by_hostname():
 
 
 def test_recognize_unknown_returns_none():
-    assert recognize("https://boards.greenhouse.io/apply/123") is None
+    assert recognize("https://example.com/apply/123") is None
 
 
 def test_recognize_fingerprint_failure_returns_none():
@@ -25,3 +25,16 @@ def test_recognize_case_insensitive():
     match = recognize("https://ACME.WD5.MYWORKDAYJOBS.COM/job/1")
     assert match is not None
     assert match.name == "workday"
+
+
+def test_recognize_greenhouse_by_hostname():
+    match = recognize("https://boards.greenhouse.io/stripe/jobs/12345")
+    assert match is not None
+    assert match.name == "greenhouse"
+    assert match.confidence == 1.0
+
+
+def test_recognize_greenhouse_job_boards_subdomain():
+    match = recognize("https://job-boards.greenhouse.io/anthropic/jobs/5023394008")
+    assert match is not None
+    assert match.name == "greenhouse"
