@@ -23,6 +23,7 @@ from config.app_config import (
 from config.constants import CUSTOM_COST_PER_TOKEN, LOG_DIR, RESUME_DIR, cost_per_token
 from config.logger_config import logger
 from src.dashboard.runtime import emit_event
+from src.job_manager.greenhouse.greenhouse_applier import GreenhouseApplier
 from src.llm.ats_recognizer import recognize
 from src.pydantic_models.log_models import LLMCall
 from src.utils.utils import append_yaml_file, get_ready_made_resume
@@ -331,6 +332,29 @@ class ApplyAgent:
                 resume_pdf_path=resume_pdf_path,
                 question_handler=question_handler,
                 authenticator=authenticator,
+            )
+        if handler_factory is not None and handler_factory() is GreenhouseApplier:
+            from pathlib import Path
+
+            from config.constants import OUTPUT_DIR_GREENHOUSE
+            from src.job_manager.greenhouse.greenhouse_applier import GreenhouseApplier
+            from src.job_manager.greenhouse.greenhouse_questions import (
+                GreenhouseQuestionHandler,
+            )
+
+            question_handler = GreenhouseQuestionHandler(
+                cache_path=Path(OUTPUT_DIR_GREENHOUSE) / "answers.yaml",
+                llm_answerer=getattr(agent_self, "llm_answerer", None),
+            )
+            resume_structured = getattr(agent_self, "resume_structured", None) or {}
+            resume_pdf_path = (
+                getattr(agent_self, "resume_pdf_path", None) or Path(RESUME_DIR) / "default.pdf"
+            )
+            return GreenhouseApplier(
+                page=agent_self.page,
+                resume_structured=resume_structured,
+                resume_pdf_path=resume_pdf_path,
+                question_handler=question_handler,
             )
         raise ValueError(f"Unknown handler factory: {handler_factory}")
 
