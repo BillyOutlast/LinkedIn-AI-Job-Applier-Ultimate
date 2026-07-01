@@ -119,7 +119,11 @@ class LinkedInMessagesConfig(BaseModel):
     old_job_message_follow_up_enabled: bool = True
     old_job_message_follow_up_text: str = "ask if the opportunity is still available"
 
-    @field_validator("max_conversations_to_scan", "reply_max_characters", "old_message_threshold_days")
+    @field_validator(
+        "max_conversations_to_scan",
+        "reply_max_characters",
+        "old_message_threshold_days",
+    )
     @classmethod
     def validate_positive_integers(cls, value, info):
         if value < 1:
@@ -131,6 +135,8 @@ class Secrets(BaseModel):
     linkedin_email: Optional[str] = None
     linkedin_password: Optional[str] = None
     indeed_email: Optional[str] = None
+    taleo_username: Optional[str] = None
+    taleo_password: Optional[str] = None
     llm_api_key: Optional[str] = None
     llm_proxy: Optional[str] = None
     llm_api_url: Optional[str] = None

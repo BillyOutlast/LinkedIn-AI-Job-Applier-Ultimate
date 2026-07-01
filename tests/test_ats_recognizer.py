@@ -38,3 +38,18 @@ def test_recognize_greenhouse_job_boards_subdomain():
     match = recognize("https://job-boards.greenhouse.io/anthropic/jobs/5023394008")
     assert match is not None
     assert match.name == "greenhouse"
+
+
+def test_recognize_taleo_by_hostname():
+    match = recognize("https://company.taleo.net/careersection/jobdetail.ftl?job=12345")
+    assert match is not None
+    assert match.name == "taleo"
+    assert match.confidence == 1.0
+
+
+def test_recognize_taleo_oracle_cloud_by_marker():
+    match = recognize(
+        "https://acme.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/123"
+    )
+    assert match is not None
+    assert match.name == "taleo"

@@ -49,6 +49,9 @@ OUTPUT_DIR_WORKDAY = "data/output/workday"
 # Greenhouse
 OUTPUT_DIR_GREENHOUSE = "data/output/greenhouse"
 
+# Taleo
+OUTPUT_DIR_TALEO = "data/output/taleo"
+
 # Default cost per token fallback when model is not in PRICE_DICT
 CUSTOM_COST_PER_TOKEN = {
     "input_cost_per_token": 0.25 / 1_000_000,
